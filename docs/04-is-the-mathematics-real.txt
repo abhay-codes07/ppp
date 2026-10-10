@@ -1,0 +1,93 @@
+CHAPTER 4. IS THE PETRI-NET MATHEMATICS REAL, OR IS "PETRI NET" A FANCY WORD?
+=============================================================================
+
+Short answer, defensible line by line:
+  The Petri-net SEMANTICS are real and standard. The ANALYSIS is real but minimal
+  (exhaustive enumeration of small nets). The repo itself implements NO analysis
+  algorithm; all of it is in the 208-line petri-ts library. The gate at runtime is a
+  marking plus the enabled-transition rule: correct, simple, and not "formal verification".
+  Most of the "proof" vocabulary on the website is marketing on top of that.
+
+4.1 What is genuinely Petri-net theory here
+-------------------------------------------
+- Places, transitions, markings, firing rule with multiplicity. petri-ts canFire counts how
+  many times a place appears in inputs and requires that many tokens; fire consumes and
+  produces. Standard place/transition nets.
+- Reachability graph by breadth-first search (petri-ts reachableStates, lines 62-97):
+  queue + seen set keyed by the sorted marking string; fires every enabled transition from
+  every state. This is the textbook explicit-state reachability construction.
+- Terminal states = markings with no enabled transition; isDeadlockFree = no terminal
+  states; the engine splits terminal states into valid (a declared terminal place holds a
+  token) and unexpected.
+- Invariant CHECKING: given a user-supplied weight vector, checkInvariant verifies the
+  weighted token sum is identical in every reachable state. For order-checkout:
+  1*inventory + 1*reserved + 1*shipped = const (verified by running `petriflow analyse`).
+- Concurrency semantics: coffee's heatWater and grindBeans are truly independent; the
+  reachability graph (5 states) shows both interleavings. contract-approval's test asserts
+  both "finance first" and "legal first" states are reachable.
+- The runtime gate's decision IS the enabled-transition rule applied to the current marking,
+  which is exactly what a Petri net executor does. Composition of nets by AND is the
+  synchronous product on shared tool names in disguise; it is sound (each net can only
+  remove behaviours).
+
+4.2 What is NOT there (and what the vocabulary suggests)
+--------------------------------------------------------
+- No P-invariant or T-invariant COMPUTATION (no incidence matrix, no null-space). Invariants
+  are only checked when a human writes the weights.
+- No boundedness decision (no coverability / Karp-Miller tree). petri-ts throws an error
+  once 10,000 states are seen; "unbounded" is a guess printed in that error.
+- No liveness, reversibility, home-state or fairness analysis.
+- No temporal logic (CTL/LTL), no model checker, no SMT. "Property proofs" in tests are
+  hand-written loops over the enumerated states (e.g. "codePending and codeDone never both
+  > 0"). Correct for tiny nets, but it is enumeration, not symbolic verification.
+- Guards are stripped before analysis (engine toNet). The analysed net OVER-approximates the
+  real behaviour: fine for "bad state unreachable" claims, unsound for "always terminates"
+  claims (a guard can create a deadlock the analysis cannot see). `petriflow analyse
+  --strict` passes on such a workflow.
+- The rules compiler's verification (verifyNets) returns only reachableStates counts. It
+  throws away isDeadlockFree, terminalStates and invariants that petri-ts computed. It cannot
+  fail. The site's "mathematically verified" for rules means "we counted 3 states".
+- Each rule net is analysed alone. The AND-composition the agent actually runs under is
+  never analysed. Two individually fine rules can make every tool unreachable
+  (labs/loopholes.ts, loophole 3).
+- SkillNets carry data OUTSIDE the Petri net: meta (a mutable JS object), validateToolCall
+  and onDeferredResult (arbitrary JavaScript), toolMapper (regex over inputs). The real
+  safety logic of the smart nets (nuke, cleanup, deploy) lives there, invisible to any
+  analysis. So the formally analysable part is the skeleton; the meaningful part is code.
+- `--strict` help text says "Exit 1 if deadlocks found", but the code only checks
+  unexpected terminal states and declared invariants; a workflow with no terminalPlaces
+  treats every deadlock as valid.
+- The viewer's "Safety properties" panel hard-codes eight results as holds: true.
+
+4.3 "Are they using the gate as a skill and Petri net as a fancy word?"
+----------------------------------------------------------------------
+Precise answer:
+- "SkillNet" is their type name for a Petri net decorated with tool labels, a free-tool
+  list, deferred flags, a toolMapper and validators. Nothing in the repo is a "skill" in
+  the agent-framework sense (no SKILL.md is loaded by the gate; the only SKILL.md is a
+  comparison input under comparisons/openclaw-safety).
+- The gate IS a Petri-net executor: tokens, enabled transitions, firing. That part is not
+  fancy wording.
+- "Formally verified / provably safe / petriflow verify / invariant PASS" on the website is
+  ahead of the code: there is no verify command, no invariant check in the rules path, and
+  the 196-state figure belongs to a different artefact (the benchmark workflow).
+- The honest description: "a runtime tool gate whose policy is a set of tiny Petri nets,
+  each exhaustively enumerated for size at load time, composed by AND, with escape hatches
+  in plain JavaScript."
+
+4.4 Where the proof vocabulary is justified
+-------------------------------------------
+- examples/05-openclaw-ops/verify.ts: deadlock-freedom, 1-token conservation and terminal
+  states for the deployment-pipeline net are really computed with petri-ts analyse.
+- workflows/*/ tests: enumeration-based assertions on the engine workflows.
+- The CLI's invariant check on order-checkout.
+These are real, small, and apply to the ENGINE side, not to the rules DSL that the website
+leads with.
+
+4.5 One demonstration that settles the question in two minutes (chapter 7, demo 3)
+----------------------------------------------------------------------------------
+Add a transition that bypasses human approval in workflows/agent-benchmark/definition.ts.
+`bun test workflows/agent-benchmark` fails one property test (the enumeration finds a state
+with code done but no approval). `petriflow analyse --strict` on the same file still exits
+0, because strict never checked that property. Both facts together are the accurate picture:
+the maths works when someone writes the property down, and nothing writes it down for you.

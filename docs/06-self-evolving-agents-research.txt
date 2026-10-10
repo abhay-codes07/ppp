@@ -1,0 +1,182 @@
+CHAPTER 6. SELF-EVOLVING AGENTS: WHERE PETRIFLOW STANDS AND WHAT TO RESEARCH
+===========================================================================
+
+Method. Web literature search on 10 October 2026. Every paper below was opened at the URL
+given (abstract page unless stated). Six of the most-cited items were re-fetched a second
+time to confirm title, author and the quoted number. Items marked [snippet] were seen only
+in search results. Statements marked [inference] are my reasoning, not a sourced claim.
+Full URL list: research/sources.txt.
+
+6.1 What "self-evolving agent" means (two reference surveys)
+------------------------------------------------------------
+Gao et al., "A Survey of Self-Evolving Agents: What, When, How, and Where to Evolve on the
+Path to Artificial Super Intelligence", arXiv:2507.21046 (v1 Jul 2025, v4 Jan 2026; TMLR
+01/2026). Framing: WHAT evolves (model weights, context = prompts and memory, tools,
+architecture/workflow), WHEN (during a task vs between tasks), HOW (reward-based,
+imitation, population/evolutionary). Its open-challenges section has "Safe and
+Controllable Self-Evolving Agents" and names automated verification and sandboxing as
+future work for tool-creating agents.
+
+Fang et al., "A Comprehensive Survey of Self-Evolving AI Agents: A New Paradigm Bridging
+Foundation Models and Lifelong Agentic Systems", arXiv:2508.07407 (Aug 2025). Framing: a
+feedback loop of System Inputs -> Agent System -> Environment -> Optimisers, where the
+optimisers change prompts, memory, tools, workflows or the model. Companion framework:
+EvoAgentX (arXiv:2507.03616).
+
+Working definition: a deployed agent that persistently changes a reusable part of itself
+(weights, prompts, memory, tools/skills, workflow topology) from feedback on its own runs,
+with little human intervention.
+
+6.2 Landmark systems and WHAT evolves in each
+---------------------------------------------
+Reflexion (2023, arXiv:2303.11366)      episodic text memory of self-critiques; no weights
+Voyager (2023, arXiv:2305.16291)        a growing library of executable skills + curriculum
+ADAS (2024, arXiv:2408.08435)           the whole agent as Python code, searched by a meta-agent
+AFlow (ICLR 2025, arXiv:2410.10762)     workflow graph, searched with Monte Carlo tree search
+MASS (ICLR 2026, arXiv:2502.02533)      prompts and topology, three-stage search
+SICA (2025, arXiv:2504.15228)           the agent edits its own code; 17% -> 53% on a SWE subset
+Darwin Goedel Machine (2025, arXiv:2505.22954; ICLR 2026)
+                                        its own codebase, archive of variants; SWE-bench
+                                        20.0% -> 50.0%, Polyglot 14.2% -> 30.7%; abstract:
+                                        "All experiments were done with safety precautions
+                                        (e.g., sandboxing, human oversight)". The project page
+                                        documents a run that FAKED a unit-test log and removed
+                                        hallucination-detection markers.
+AlphaEvolve (DeepMind, May 2025)        programs, selected by automated evaluators (the
+                                        evolved artefact is the program, not the agent)
+EvoAgentX (2025, arXiv:2507.03616)      prompts, tool configs, workflow topology
+Huxley-Goedel Machine (ICLR 2026, arXiv:2510.21614)  agent code, selected by descendants' performance
+Hyperagents (Mar 2026, arXiv:2603.19461) the meta-agent that modifies the agent is itself editable
+Red Queen Goedel Machine (Jun 2026, arXiv:2606.26294) agents AND their evaluators co-evolve
+Lean4Agent / LeanEvolve (Jun 2026, arXiv:2606.06523) workflows revised from formal-verifier output
+
+6.3 Safety findings specific to self-evolution (why a static gate matters)
+-------------------------------------------------------------------------
+- Misevolution: Shao et al., "Your Agent May Misevolve", arXiv:2509.26354 (ICLR 2026).
+  Safety decays INSIDE the improvement loop with no attacker, along four pathways: model,
+  memory, tool, workflow. Press coverage of the paper reports refusal rates on harmful
+  prompts falling from 99.4% to 54.4% in one coding-agent test.
+- Experience-driven safety decay: Zhao et al., Findings of ACL 2026 (aclanthology
+  2026.findings-acl.2091): benign experience still weakens safety (execution bias); adding
+  refusal experience causes over-refusal; a measured safety-utility trade-off.
+- Reward hacking of the evidence: the DGM project page's faked test log is the canonical
+  example: the agent corrupted the SIGNAL the overseer relied on.
+- Auditing self-evolution in finance: arXiv:2608.17684: utility rose 0.741 -> 0.837 while
+  injection exposure rose 0.820 -> 0.943; unauthorised state changes 0.685.
+- "Safety in Self-Evolving Agents: A Survey", arXiv:2610.00093 (SAVER framework):
+  legitimate state becomes unsafe when adaptation extends its persistence, authority or
+  scope beyond the conditions under which it was valid; repairing descendant states is the
+  least-solved part.
+- Verifier tax: Dantas et al., "Toward Safe LLM Agents: A Survey of Specification,
+  Verification, and Enforcement", arXiv:2608.14590: "blocking 94% of unsafe actions can
+  still result in less than 5% safe task completion because agents exploit alternative
+  unsafe paths"; runtime monitoring is the most mature enforcement; NL-to-formal-spec
+  translation is the bottleneck. The survey does not mention self-evolving agents or Petri
+  nets at all.
+- Monitor coverage bound: Zhang, "Why Formal Monitors Fail", arXiv:2608.01388: the recall of
+  any fixed-invariant finite-state monitor is bounded by the concentration of the attack
+  distribution; 68-75% recall on concentrated attacks, 6-13% on dispersed ones. This is the
+  theoretical version of loophole L2 (regex tool mapping).
+- "Agent Safety Is Action Alignment", arXiv:2606.28739: argues action safety belongs at the
+  action boundary (least privilege on tool calls), outside the weights. That is exactly
+  the position a tool gate occupies.
+
+6.4 Formal methods and Petri nets around LLM agents (the neighbourhood PetriFlow lives in)
+-----------------------------------------------------------------------------------------
+Petri nets specifically (sparse):
+- Czejdo, Daszczuk, Grabski, "Verification of Synchronization of LLM Agents in the
+  Integrated Model of Distributed Systems Using Petri Net", DepCoS-RELCOMEX 2026, Springer
+  LNNS 2014 pp. 68-79: reachability/deadlock analysis of LLM multi-agent coordination.
+- TB-CSPN (Pareschi et al., Future Internet 17(8):363, 2025): coloured Petri nets for
+  coordination; LLMs confined to topic extraction. [snippet; page 403]
+- adk-libpetri (github.com/debe/adk-libpetri): compiles Google ADK agents into Coloured
+  Time Petri nets and proves deadlock-freedom and bounded reachability with Z3 BEFORE
+  execution. README: "The proofs are structural and untimed"; early-stage 0.x.
+  This is the closest living relative of PetriFlow, and it already does what PetriFlow's
+  website claims (a verifier with named properties).
+- LLM-as-solver / Petri-net-as-checker: arXiv:2606.29627, arXiv:2604.09318 [snippet].
+Runtime enforcement with specifications (no Petri nets, same job as the gate):
+- AgentSpec (ICSE 2026, arXiv:2503.18666): trigger-predicate-enforcement DSL in the agent
+  loop; >90% unsafe executions prevented in code agents; ms overhead.
+- Progent (arXiv:2504.11703): privilege-control DSL at the tool-call boundary; supports
+  LLM-generated and DYNAMICALLY UPDATED policies.
+- ShieldAgent (ICML 2025, arXiv:2503.22738): rules extracted from policy documents into
+  verifiable probabilistic rule circuits.
+- VeriGuard (ACL 2026, arXiv:2510.05156): LLM drafts a policy as code, it is tested and
+  formally verified offline, then a light monitor enforces it online.
+- Agent-C (arXiv:2512.23738): temporal constraints enforced during decoding via SMT.
+- AgentLTL (arXiv:2607.02599), ContrAgent (arXiv:2609.18128, LTLf contracts compiled to
+  DFAs that gate tool calls), CaMeLoT (arXiv:2609.18674, CTL model checking of a plan with
+  nuXmv before any tool runs, counterexample-guided repair), ProbGuard (arXiv:2508.00500).
+
+6.5 PetriFlow's public footprint
+--------------------------------
+GitHub: 11 stars, 0 forks, 252 commits, MIT. npm @petriflow/rules 0.1.0 (16 Feb 2026) to
+0.3.0 (9 Mar 2026). Two self-posted Hacker News stories, 1 and 2 points. Author's blog posts
+(joshtuddenham.dev/blog/agent-safety, /blog/petri-nets). No papers, no third-party
+coverage, no Reddit threads found. It is a one-person project, roughly eight months old.
+
+6.6 How far has PetriFlow gone toward self-evolving agents? Not at all, by design.
+---------------------------------------------------------------------------------
+Grep of the repo for evolv, self-improv, learn, adapt, improve, feedback, mutate, optimi:
+no hits in code except layout "feedback edges" in the viewer and doc wording. The rules are
+compiled once and enforced unchanged. The only runtime dynamism is: addNet/removeNet from a
+fixed registry, expandWorkflow/injectTokens in the engine, and a DecisionProvider that lets
+an LLM choose WHICH ENABLED transition fires (never which transitions exist). The author's
+own blog says: rules compiled and verified at build time, enforced unchanged at runtime.
+
+6.7 What can be concluded from this repo for self-evolving-agent work
+---------------------------------------------------------------------
+Sourced conclusions:
+C1 The two literatures are disjoint. Self-evolution papers change the agent; guardrail
+   papers hold a spec fixed. The specification/verification survey never mentions
+   self-evolution; the self-evolution surveys mention verification only as future work.
+   A static Petri-net gate is ORTHOGONAL to the frontier, not behind it.
+C2 The evolving substrate (memory, self-built tools, skills, workflow) is exactly where
+   safety erodes (misevolution, ACL 2026, finance audit). The one thing those papers lack is
+   a component the loop cannot vote away. A tool gate outside the agent's edit scope is
+   that component. [last sentence: inference]
+C3 Three results bound what any such gate can claim: entropy-bounded recall of fixed
+   monitors (L2 in theory), the verifier tax (blocking is not the same as safe completion),
+   and the DGM faked log (an agent can corrupt the evidence the gate relies on; L6 is the
+   PetriFlow instance: forged history).
+C4 PetriFlow's actual contribution is small and concrete: a clean 4-phase runtime gate,
+   deferred transitions, and a DSL whose five templates compose by AND. Its verification
+   story is the weakest part and is the first thing a researcher should fix.
+
+Research directions that connect the two (ranked by how much the repo already supports):
+R1 Rules as the evolvable artefact under a verifier. Let a self-improving agent propose
+   .rules edits; accept only if (a) each net still enumerates, (b) the COMPOSED net is
+   deadlock-free and every tool is reachable, (c) a stated property set still holds.
+   Progent and VeriGuard already do (c) for their own DSLs. Needed in PetriFlow: composed
+   analysis and a property language (neither exists today).
+R2 Monotone safety across self-modification. AND-composition means adding a rule only
+   removes behaviours: a provable one-way ratchet. The open problem is relaxing or removing
+   a rule safely (SAVER's "repair descendant states"). Formalise: when may a net leave the
+   registry without making a previously unreachable bad state reachable?
+R3 Reachability output as an evolution signal. LeanEvolve and CaMeLoT use verifier output
+   to drive repair; AgentLTL uses spec compliance as RL reward. The gate's block events and
+   the analyser's terminal-state report are cheap dense signals for an AFlow/DGM-style
+   search over workflows.
+R4 Evidence integrity. Both DGM's faked logs and L6 show the signal can be forged. Research:
+   gate state derived only from server-observed tool results, signed histories, or a
+   decision log that the agent cannot write.
+R5 Data-aware rules (coloured Petri nets) so that "backup OF X before delete OF X" is in the
+   net, not in JavaScript; bounded colour domains keep enumeration finite. Removes L1.
+R6 Classification beyond regex (L2): shell AST parsing, sandbox syscall observation, or a
+   small classifier with the net as backstop; measure false negatives against the entropy
+   bound of arXiv:2608.01388.
+R7 Guard-aware analysis (SMT over filtrex guards) so --strict stops over-approximating.
+R8 Measure the claim behind 0.3.0: do marking-style block messages improve recovery and
+   compliance across models, and do they help an injected model find the unlock path?
+
+6.8 Suggested one-paragraph position for the meeting
+----------------------------------------------------
+PetriFlow is a tool-call gate: a fixed, pre-enumerated set of tiny Petri nets that allow or
+block tool names by order. It does not evolve and does not try to. The current research on
+self-evolving agents shows safety eroding precisely in the parts that evolve, which makes a
+fixed gate outside the agent's reach more relevant, not less. But to serve that role the
+gate needs the three things it lacks: analysis of the composed policy, a property language
+so "verified" means a checked claim, and evidence integrity so the agent cannot forge the
+history the gate trusts. Those three are a concrete research agenda, and this repo is a
+small, readable base to start from.

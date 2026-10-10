@@ -1,0 +1,70 @@
+SOURCES FOR CHAPTER 6 (all retrieved 10 October 2026)
+=====================================================
+Items marked * were fetched a second time directly to confirm title, author and the quoted
+number. Items marked [snippet] were seen only in search results.
+
+Surveys on self-evolving agents
+* Gao et al., A Survey of Self-Evolving Agents: What, When, How, and Where to Evolve on the
+  Path to Artificial Super Intelligence. arXiv:2507.21046  https://arxiv.org/abs/2507.21046
+  Fang et al., A Comprehensive Survey of Self-Evolving AI Agents. arXiv:2508.07407
+  https://arxiv.org/abs/2508.07407   companion list:
+  https://x-izhang-awesome-self-evolving-agents.static.hf.space/
+  Xiang, Yang et al., A Systematic Survey of Self-Evolving Agents: From Model-Centric to
+  Environment-Driven Co-Evolution. https://doi.org/10.36227/techrxiv.177203250.05832634/v2
+  (listed at https://github.com/XMUDeepLIT/Awesome-Self-Evolving-Agents)
+  Xu et al., Self-Evolving Agents as Dynamic Graph Transformation. arXiv:2608.18104
+  Zhou et al., Self-Evolving Coding Agents. arXiv:2608.03392
+  Ren et al., Self-Improvements in Modern Agentic Systems: A Survey. arXiv:2607.13104
+  Chen et al., Safety in Self-Evolving Agents: A Survey (SAVER). arXiv:2610.00093
+  Yang et al., Self-Improvement of Large Language Models: A Technical Overview. arXiv:2603.25681
+  Co-Evolution in Agentic Systems. arXiv:2608.10299 [snippet]
+
+Landmark systems
+  Reflexion. arXiv:2303.11366          Voyager. arXiv:2305.16291
+  ADAS. arXiv:2408.08435               AFlow. arXiv:2410.10762 (ICLR 2025)
+  MASS. arXiv:2502.02533 (ICLR 2026)   SICA. arXiv:2504.15228
+* Darwin Goedel Machine. arXiv:2505.22954  https://arxiv.org/abs/2505.22954
+  project page https://sakana.ai/dgm/   ICLR 2026 https://iclr.cc/virtual/2026/poster/10007327
+  AlphaEvolve blog, 14 May 2025:
+  https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/
+  EvoAgentX. arXiv:2507.03616          Huxley-Goedel Machine. arXiv:2510.21614 (ICLR 2026)
+  Hyperagents. arXiv:2603.19461        Red Queen Goedel Machine. arXiv:2606.26294
+  Lean4Agent / LeanEvolve. arXiv:2606.06523
+
+Safety of self-evolving agents
+* Shao et al., Your Agent May Misevolve: Emergent Risks in Self-evolving LLM Agents.
+  arXiv:2509.26354 (ICLR 2026)  https://arxiv.org/abs/2509.26354
+  press: https://www.yahoo.com/news/articles/self-evolving-ai-agents-unlearn-203037807.html
+  Zhao et al., On Safety Risks in Experience-Driven Self-Evolving Agents. Findings of ACL 2026
+  https://aclanthology.org/2026.findings-acl.2091/
+  Li & Zhu, Auditing Self-Evolution in Financial Agents. arXiv:2608.17684
+* Dantas et al., Toward Safe LLM Agents: A Survey of Specification, Verification, and
+  Enforcement. arXiv:2608.14590  https://arxiv.org/abs/2608.14590  (verifier tax: 94% / <5%)
+* Zhang, Why Formal Monitors Fail: Attack Distribution Entropy as a Coverage Bound for
+  LTL-Based LLM Agent Safety. arXiv:2608.01388  https://arxiv.org/abs/2608.01388
+  Li & Zhao, Agent Safety Is Action Alignment. arXiv:2606.28739
+  Do Self-Evolving Agents Forget? arXiv:2605.09315 [snippet]
+  Towards Healthy Evolution (human-agent interaction). arXiv:2606.06114 [snippet]
+  Multi-Agent Security Tax. arXiv:2502.19145 [snippet]
+
+Petri nets and formal methods around LLM agents
+  Czejdo, Daszczuk, Grabski, Verification of Synchronization of LLM Agents in the IMDS
+  Using Petri Net. DepCoS-RELCOMEX 2026, Springer LNNS 2014.
+  https://link.springer.com/chapter/10.1007/978-3-032-27927-9_7
+  Pareschi, Bottoni, Borghoff, TB-CSPN. Future Internet 17(8):363, 2025.
+  https://www.mdpi.com/1999-5903/17/8/363 [snippet; page returned 403]
+* adk-libpetri (Google ADK agents compiled to Coloured Time Petri nets, Z3 proofs)
+  https://github.com/debe/adk-libpetri
+  LLM + Petri-net checker: arXiv:2606.29627, arXiv:2604.09318 [snippet]
+  AgentSpec. arXiv:2503.18666 (ICSE 2026)     ProbGuard. arXiv:2508.00500
+  Progent. arXiv:2504.11703                   ShieldAgent. arXiv:2503.22738 (ICML 2025)
+  VeriGuard. arXiv:2510.05156 (ACL 2026)      Agent-C. arXiv:2512.23738
+  AgentLTL. arXiv:2607.02599                  ContrAgent. arXiv:2609.18128
+  CaMeLoT. arXiv:2609.18674                   Causal Past Logic RV. arXiv:2605.20923
+
+PetriFlow public footprint
+  https://github.com/joshuaisaact/petri-flow (11 stars, 0 forks, 252 commits, MIT)
+  https://joshtuddenham.dev/blog/agent-safety/   https://joshtuddenham.dev/blog/petri-nets/
+  https://petriflow.joshtuddenham.dev/           https://registry.npmjs.org/@petriflow/rules
+  Hacker News items 47035215 (1 point) and 46999339 (2 points) via hn.algolia.com
+  Name collisions, NOT this project: https://petriflow.org/ (Netgrif), hooopo/petri_flow (Ruby)

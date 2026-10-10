@@ -1,0 +1,98 @@
+CHAPTER 3. THE WEBSITE VERSUS THE CODE
+=====================================
+
+Source audited: site/src (17 Astro pages) of github.com/joshuaisaact/petri-flow, compared
+line by line with packages/, examples/ and the CLI. Audit date: 10 October 2026.
+Every item below was re-checked by opening the named file or by running the code.
+
+3.1 What the website is
+-----------------------
+- 17 pages: landing page, examples, integrations, tutorials index, a docs hub, six reference
+  pages (rules, engine, gate, vercel-ai, claude-code, agent-sdk) and six tutorials
+  (file safety, deployment, discord bot, devops assistant, workflow safety, server integration).
+- No diagrams as images. All "diagrams" are ASCII boxes, text tables, or an interactive
+  step-trace widget.
+- Default tagline: "Safety rules for AI agents. Formally verified. Structurally enforced."
+
+3.2 How the "real example" is shown
+-----------------------------------
+The site's running example is Tutorial 1, "Build a File Safety Agent":
+
+    rules file (safety.rules)
+        require backup before delete
+        block rm
+    code
+        const { nets } = loadRules("./safety.rules")
+        const gate = createPetriflowGate(nets, { isToolResultError })
+        const session = gate.wrapTools(tools)
+        await generateText({ model: openai("gpt-4o"), tools: session.tools,
+                             system: session.systemPrompt(), stopWhen: stepCountIs(10) })
+
+Install line shown: bun add @petriflow/vercel-ai @petriflow/rules ai @ai-sdk/openai zod
+Model shown: OpenAI gpt-4o. The linked repo file examples/01-file-management/agent.ts uses
+Anthropic claude-sonnet-4-5 instead, and examples/package.json has no OpenAI dependency.
+So the site's example cannot be copied and run from the repo as-is with either key without
+a small edit.
+
+How to run it yourself on a company laptop (Azure OpenAI, service principal):
+    the port lives in labs/openai/01-file-agent.ts of this repo. Same two rules, same
+    five tools, Windows-safe paths, a MOCK=1 rehearsal mode, and Azure/OpenAI selection
+    from environment variables. See chapter 7 (demo script) and chapter 13 (Azure setup).
+
+Tutorial to repo mapping (verified):
+    Tutorial 1 file safety        -> examples/01-file-management  (rules match; provider differs)
+    Tutorial 2 deployment         -> examples/02-deployment       (rules match; provider differs)
+    Tutorial 3 discord bot        -> examples/03-discord-bot      (needs DISCORD_BOT_TOKEN, DISCORD_GUILD_ID; site never says so)
+    Tutorial 4 devops assistant   -> examples/04-devops-assistant (needs Brave, Slack, Gmail, Resend keys; site never says so)
+    Tutorial 5 workflow safety    -> examples/05-openclaw-ops     (net matches; wiring snippet has no file; rules file is ops-assistant.rules not safety.rules)
+    Tutorial 6 server integration -> no file in the repo; uses hono, which is not a dependency anywhere
+
+3.3 Claims on the site that the code does NOT back
+--------------------------------------------------
+1. "$ petriflow verify" with invariants "no unguarded delete PASS", "0 violations across 196 states".
+   - The CLI has one command: analyse. cli.ts line 25-27 prints "Available commands: analyse".
+   - The rules compiler's verification is verifyNets() in packages/rules/src/compiler.ts
+     lines 388-396. It returns {name, reachableStates} and nothing else. It never fails and
+     checks no invariant.
+   - "196 states / 4 terminal" is the agent-benchmark WORKFLOW (BENCHMARK.md), not the
+     backup-before-delete rule, which compiles to a 3-state net.
+2. "Layer 1: pick a preset": backupBeforeDelete(), observeBeforeSend(), testBeforeDeploy().
+   - These functions exist nowhere in the code. Only CHANGELOG 0.1.0 mentions them.
+   - @petriflow/rules exports compile, loadRules, defineSkillNet, createGateManager.
+3. import from "@petriflow/openclaw".
+   - The package is named "@petriflow/petriflow-gate" (packages/openclaw/package.json line 2).
+4. "Every reachable state checked. Zero bypasses possible." and "Proven safe" in the
+   comparison table.
+   - True only in the narrow sense: the shape of each tiny rule net is enumerated. Nothing
+     checks the property a user cares about; see chapter 4 and chapter 5.
+5. The landing-page WhatsApp trace: "limit whatsapp.send to 1 per whatsapp.lookup",
+   "Agent calls lookup -> OK".
+   - Run it (labs/loopholes.ts, loophole 5): the FIRST lookup is BLOCKED, because the
+     refill transition needs a 'spent' token and the budget starts full. The net has
+     jurisdiction over lookup, so it cannot abstain. The site's own headline trace is wrong.
+6. "sub-millisecond overhead": no benchmark in the repo measures it.
+7. agent-sdk docs: onDecision is typed (decision) => void on the site; the real signature is
+   (event, decision) => void. "updatedInput" transform is claimed; the string does not
+   appear in packages/agent-sdk/src.
+8. Home page says five tutorials; there are six. index.astro's defineSkillNet snippet is
+   missing required fields and would not type-check.
+
+3.4 Claims that DO check out
+----------------------------
+- Rule net sizes: sequence 3 states, approval 2, block 2, session limit N+2, action limit N+2.
+  Matches compiler.ts lines 177-296 and the compile() output.
+- The gate's four verdicts (free / abstain / gated / blocked) and four phases
+  (classify, approvals, validate, commit). Matches packages/gate/src/compose.ts.
+- Tutorial 5's three properties (deadlock-free, token conservation, terminal states) are
+  really computed, by examples/05-openclaw-ops/verify.ts using petri-ts analyse(). This is
+  the one place where the site's "proof" language is backed by code.
+- Vercel AI adapter API (wrapTools, ToolCallBlockedError, replay from messages, shadow mode).
+- Engine API (defineWorkflow, Scheduler, sqliteAdapter, analyse with invariants).
+- The admission on docs/rules: "require a before b" plus "require b before a" is a deadlock
+  the compiler does not detect. True (labs/loopholes.ts, loophole 3).
+
+3.5 One-sentence verdict for the meeting
+----------------------------------------
+The library is real and the mathematics inside it is real but small; the website's
+headline wording ("provably safe", "petriflow verify", "0 violations across 196 states")
+describes a product that is one step ahead of the code.

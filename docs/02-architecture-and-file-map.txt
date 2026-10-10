@@ -1,0 +1,192 @@
+CHAPTER 2. ARCHITECTURE AND THE FILE MAP
+========================================
+
+Everything here was read from the source of github.com/joshuaisaact/petri-flow on
+10 October 2026 (main branch, commit dcd6196). Line counts are approximate.
+Diagrams: diagrams/11-package-layers.png, 13-tool-call-journey.png, 16-gate-state.png,
+17-rules-pipeline.png, 18-adapters.png, 20-scheduler-tick.png, 21-sqlite-persistence.png.
+
+2.1 Two products in one repository
+----------------------------------
+PRODUCT A: the WORKFLOW ENGINE. You describe a process as a Petri net (places, transitions,
+tokens), attach guards and executors to transitions, and a Scheduler runs it with SQLite
+persistence. The CLI analyses the net before it runs.
+
+PRODUCT B: the TOOL GATE. You describe which tool calls an AI agent may make, in which order,
+as small Petri nets (SkillNets). Adapters plug the gate into agent frameworks. A rules DSL
+compiles one-line rules into those nets.
+
+Both sit on one external library: petri-ts (v0.2.0, 208 lines of JavaScript) which holds the
+actual Petri-net mathematics: canFire, fire, reachableStates, terminalStates, isDeadlockFree,
+checkInvariant, analyse.
+
+2.2 Dependency chain
+--------------------
+    petri-ts (external)
+      -> @petriflow/engine        (workflow engine; re-exports petri-ts)
+           -> @petriflow/gate     (tool gate core: SkillNet, GateManager, 4-phase decision)
+                -> @petriflow/rules        (DSL compiler -> SkillNets)
+                -> @petriflow/vercel-ai    (wrapTools, replay from messages)
+                -> @petriflow/agent-sdk    (Claude Agent SDK hooks, in-process)
+                -> @petriflow/claude-code  (hook process, state in /tmp JSON)
+                -> @petriflow/petriflow-gate  (folder packages/openclaw; OpenClaw plugin)
+                -> @petriflow/pi-extension -> @petriflow/pi-assistant (hand-written nets)
+           -> @petriflow/cli      (petriflow analyse)
+           -> apps/viewer         (React + xyflow visualiser)
+
+Packages import each other through dist/, so `bun run build` must run before `bun test`.
+
+VERIFIED QUIRK: packages/gate/package.json asks for "@petriflow/engine": "^0.1.3". The
+workspace engine is 0.3.0, so Bun installs a nested copy packages/gate/node_modules/
+@petriflow/engine at 0.1.3, which bundles petri-ts 0.1.6. The analysis path (rules, engine,
+CLI) uses petri-ts 0.2.0. The runtime gate uses the nested 0.1.6 canFire/fire. Two versions of
+the core maths are live in one install. For normal nets they behave the same.
+
+2.3 File map, package by package
+--------------------------------
+packages/engine/src  (workflow engine, v0.3.0)
+  index.ts          84   barrel; re-exports petri-ts functions and types
+  types.ts          64   WorkflowTransition = Transition & {type, guard, timeout, config}
+  workflow.ts      290   defineWorkflow (validates places, compiles guards), expandWorkflow,
+                         injectTokens, toNet (STRIPS guards/executors/timeouts for analysis)
+  analyse.ts        63   analyse(definition): petri-ts analyse + split of terminal states into
+                         valid (a terminalPlace has a token) and unexpected
+  engine.ts         85   canFireWorkflow (structural rule AND guard), fireWorkflow (+executor)
+  executor.ts      232   createExecutor -> step / stepBatch; optional DecisionProvider picks
+                         one enabled transition when several are enabled
+  decision.ts       24   DecisionProvider interface (an LLM can implement it)
+  guard.ts           8   compileGuard: a filtrex expression over {...context, marking}
+  nodes.ts         103   httpNode (with private-host SSRF check), timerNode
+  scheduler.ts     345   Scheduler.tick: expired timeouts -> step -> reschedule -> persist
+  persistence/     ~490  WorkflowPersistence interface, SQL schema (3 tables), sqliteAdapter
+                         with optimistic versioning, definition store
+  tests: 12 files, 125 tests (analyse, batch, scheduler, timeout, sqlite, nodes, guards...)
+
+packages/gate/src  (tool gate core, v0.3.2)
+  types.ts          81   SkillNet, GatedTransition, RuleMetadata, defineSkillNet (identity fn)
+  events.ts         23   GateToolCall, GateToolResult, GateContext {hasUI, confirm}, GateDecision
+  gate.ts          185   single-net handleToolCall / handleToolResult, GateState
+                         {marking, meta, pending}, resolveTool, formatMarking
+  compose.ts       187   classifyNets (phase 1) and composedToolCall (4 phases, AND logic)
+  advance.ts        72   autoAdvance: fires structural (auto, no-tool) transitions to fixpoint;
+                         refuses ambiguous choices; detects cycles
+  manager.ts       258   createGateManager: handleToolCall, handleToolResult, replay,
+                         addNet/removeNet (registry mode), formatStatus, formatSystemPrompt,
+                         shadow mode
+  format.ts         36   formatBlockReason from ruleMetadata (text the LLM can act on)
+  find-blocking-net.ts 20
+  tests: gate.test (598 lines), compose.test (668), replay.test (221); 107 tests
+
+packages/rules/src  (DSL compiler, v0.3.0)
+  compiler.ts      439   parseLine (map / require / require human-approval / limit / block),
+                         compileSequence (3 states), compileApproval (2), compileBlock (2),
+                         compileLimit (N+2; per-action adds spent + refill), buildToolMapper
+                         (map regex + dot notation), toPetriNet, verifyNets (COUNTS states only)
+  index.ts           5   compile, loadRules; re-exports defineSkillNet, createGateManager
+  tests: compiler.test (1183 lines, 67 tests)
+
+packages/vercel-ai/src  (reference adapter, v0.4.0)
+  index.ts          98   createPetriflowGate(nets, {isToolResultError, confirm, onDecision,
+                         transformBlockReason}) -> wrapTools(tools, {messages}) -> session
+  wrap-tools.ts     91   wraps each tool's execute: handleToolCall -> run -> handleToolResult
+  replay.ts        157   extractReplayEntries(messages): pairs tool-call and tool-result parts
+                         by toolCallId; TRUSTS the history it is given
+  errors.ts         14   ToolCallBlockedError
+  nets/tool-approval.ts 23
+  tests: wrap-tools.test (661), replay.test (413); 64 tests
+
+packages/agent-sdk/src  (v0.1.0): index.ts 151 (PreToolUse / PostToolUse /
+  PostToolUseFailure hooks sharing one in-process manager), nets/safe-coding.ts; 21 tests
+packages/claude-code/src  (v0.1.0): hook.ts 154 (a NEW PROCESS per event: restore state ->
+  decide -> save state), state.ts 89 (/tmp/petriflow-claude-code-<session>.json, not atomic),
+  nets/safe-coding.ts (Bash blocked); 18 tests
+packages/openclaw/src  (v0.1.0, npm name @petriflow/petriflow-gate): index.ts 119 (plugin with
+  before_tool_call / after_tool_call; no toolCallId from host, so synthetic ids matched FIFO
+  per tool name), nets/tool-approval, nets/whatsapp-safety; 20 tests
+packages/pi-extension/src  (v0.1.0): index.ts 95 (createPetriGate, composeGates), nets/
+  tool-approval, implement (bash -> git-commit/git-push via toolMapper), nuke (182 lines:
+  backup before destroy WITH path coverage checked in meta); 19 tests
+packages/pi-assistant/src  (v0.1.0): cleanup (179), communicate (158), deploy (138),
+  research (102): hand-written nets using validateToolCall and meta; 59 tests
+packages/cli/src: cli.ts 95 (petriflow analyse <file> [--dot|--json|--strict]), format.ts 76;
+  4 tests
+
+workflows/  coffee (81 lines), contract-approval (131), github-lookup (63), order-checkout
+  (85, declares an inventory invariant), simple-agent (105), agent-benchmark (271); each has
+  index.ts (runs it with Scheduler + in-memory SQLite) and a test file; 40 tests
+examples/   01-file-management, 02-deployment, 03-discord-bot, 04-devops-assistant (Vercel
+  AI + Anthropic + .rules files), 05-openclaw-ops (56-rule file, hand-built pipeline net,
+  verify.ts); 46 tests
+comparisons/ n8n (agent-benchmark vs an n8n JSON) and openclaw-safety (4 scenarios as
+  engine workflows with reachability assertions); 49 tests
+apps/viewer/  React + Vite + xyflow; nets/*.ts wrap the workflows; EIGHT property results are
+  hard-coded `holds: true` literals (nets/agent-benchmark.ts and the four openclaw nets),
+  and six "bounded" checks test reachableStateCount < 10000, which can never be false
+  because petri-ts throws at 10000. The editor calls /definitions on a server that does
+  not exist in the repo.
+site/       Astro docs site, 17 pages, no images (see chapter 3).
+
+2.4 One tool call, end to end (diagram 13)
+------------------------------------------
+1. The LLM picks a tool. The adapter intercepts (wrapTools execute wrapper, or a hook).
+2. GateManager.handleToolCall -> composedToolCall over all active nets:
+   Phase 1 classify, per net: resolvedTool = toolMapper(event) or the name.
+     in freeTools                      -> FREE
+     no transition lists the tool      -> ABSTAIN (net has no opinion)
+     listed, but none canFire          -> BLOCKED
+     listed and some canFire           -> GATED (first matching transition)
+   Any BLOCKED -> block with formatBlockReason text. No GATED -> allow.
+   Phase 2 approvals: for each gated MANUAL transition, if !ctx.hasUI block; else await
+     ctx.confirm(); a "no" blocks.
+   Phase 3 validate: snapshot meta; run each net's validateToolCall; on reject, roll back
+     meta of nets already validated and block.
+   Phase 4 commit: re-check canFire (state may have moved during the awaits: TOCTOU);
+     deferred -> record in pending[toolCallId]; else fire, then autoAdvance.
+3. The tool runs (real side effect).
+4. handleToolResult: pop pending; if !isError and canFire -> fire deferred transition,
+   onDeferredResult, autoAdvance. On error: forget the pending entry; nothing fires.
+5. Blocked calls surface to the model as a tool error with the reason text, so it can
+   choose the unlocking action.
+
+2.5 The workflow engine tick (diagram 20)
+-----------------------------------------
+Scheduler.tick(): load instances from the persistence adapter -> for each: fire expired
+timeouts (add tokens) -> executor.step or stepBatch (guards evaluated here, decision
+provider if several enabled) -> schedule timeouts for newly enabled transitions -> persist
+marking, context, history with an optimistic version check -> mark completed when a
+terminal place holds a token, failed when an executor throws.
+
+2.6 What the gate does NOT use at runtime
+-----------------------------------------
+packages/gate/src imports only canFire and fire from the engine. It never calls
+reachableStates, analyse or checkInvariant. The `guard` field on GatedTransition is declared
+but never evaluated by the gate. terminalPlaces is never read by the gate. The analysis
+result influences nothing at runtime; it is information for the developer.
+
+2.7 State between calls, per adapter
+------------------------------------
+vercel-ai    in memory per wrapTools() call; across HTTP requests the CALLER passes
+             messages and replay rebuilds the marking from tool-call/tool-result pairs.
+             Replay fires transitions directly, skipping manual approval and
+             validateToolCall. Pending deferred calls are not carried over.
+claude-code  a fresh process per hook event; JSON file in /tmp; read-modify-write without
+             locks; SessionStart deletes the file.
+agent-sdk    one in-process manager per createPetriflowGate(); one gate per conversation.
+openclaw     one in-process manager per plugin registration; synthetic ids, FIFO matching.
+pi-extension one in-process manager per composeGates(); removed nets keep their state.
+engine       SQLite with versioning (the only durable, concurrency-aware store).
+
+2.8 Reading order for the code (90 minutes)
+-------------------------------------------
+ 1 workflows/coffee/definition.ts            a whole net in 80 lines
+ 2 node_modules/petri-ts/dist/index.js       all the maths, 208 lines
+ 3 packages/engine/src/analyse.ts            what "analyse" adds (terminal split)
+ 4 packages/gate/src/types.ts                SkillNet
+ 5 packages/gate/src/compose.ts              the four phases
+ 6 packages/gate/src/advance.ts              autoAdvance
+ 7 packages/rules/src/compiler.ts            five templates + verifyNets
+ 8 packages/vercel-ai/src/replay.ts          replay trusts history
+ 9 packages/claude-code/src/state.ts         /tmp state file
+10 packages/pi-extension/src/nets/nuke.ts    what a data-aware net needs (meta + validator)
+11 packages/cli/src/cli.ts                   --strict
+12 workflows/agent-benchmark/agent-benchmark.test.ts   property checks by enumeration

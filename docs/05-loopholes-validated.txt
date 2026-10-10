@@ -1,0 +1,117 @@
+CHAPTER 5. LOOPHOLES: WHAT IS REAL, RANKED, AND HOW EACH WAS VALIDATED
+=====================================================================
+
+Validation levels:
+  [RUN]  reproduced by executing code in this repository (labs/loopholes.ts, labs/openai/
+         03-spoof.ts, or the break-the-proof steps in chapter 7). Output is pasted below.
+  [READ] established by reading the named source lines; not executed.
+Severity: HIGH = a rule can be bypassed. MEDIUM = a rule can silently stop working or
+misfire. LOW = rough edge.
+
+5.1 The five you can run live (bun run labs/loopholes.ts) -- all [RUN]
+--------------------------------------------------------------------
+L1 HIGH  Any backup unlocks any delete.
+    rule: require backup before delete
+      backup({"name":"readme.txt"}) -> allowed
+      delete({"name":"production.db"}) -> allowed
+    The net counts tool NAMES. The DSL has no syntax for "backup OF the same path". Only the
+    hand-written nuke/cleanup nets check path coverage, in JavaScript, outside the net.
+
+L2 HIGH  Tool mapping is a regular expression on a string.
+    rules: map bash.command rm as delete / block delete
+      bash({"command":"rm -rf /data"})                 -> BLOCKED
+      bash({"command":"find /data -delete"})           -> allowed
+      bash({"command":"python -c \"import shutil; shutil.rmtree('/data')\""}) -> allowed
+      bash({"command":"CMD=rm; $CMD -rf /data"})       -> BLOCKED (the word rm appears)
+    The site's own argument against deny-lists ("never complete") applies to the map layer.
+
+L3 MEDIUM  Two "verified" rules that block everything.
+    rules: require a before b / require b before a
+      compile() verification: [{"name":"require-a-before-b","reachableStates":3},
+                               {"name":"require-b-before-a","reachableStates":3}]
+      a({}) -> BLOCKED (a requires a successful call to b first.)
+      b({}) -> BLOCKED (b requires a successful call to a first.)
+    Each net is analysed alone; the composition never. docs/rules on the site admits this.
+
+L4 LOW  A limit counts attempts, not successes.
+    rule: limit push to 2 per session
+      push -> allowed (tool reported failure)
+      push -> allowed (tool reported failure)
+      push -> BLOCKED (push has reached its limit of 2 calls per session.)
+    The limit template is not deferred, so failed calls spend budget.
+
+L5 MEDIUM  The website's headline example does not run as shown.
+    rule: limit whatsapp.send to 1 per whatsapp.lookup   (site trace: "Agent calls lookup -> OK")
+      whatsapp({"action":"lookup"}) -> BLOCKED (whatsapp.send has reached its limit ...)
+      whatsapp({"action":"send"})   -> allowed
+      whatsapp({"action":"send"})   -> BLOCKED
+      whatsapp({"action":"lookup"}) -> allowed
+    The refill transition needs a 'spent' token, so the first lookup is blocked while the
+    budget is full. Because the net lists lookup on a transition, it has jurisdiction and
+    cannot abstain. The only compiler test of per-action limits never calls the refill
+    action while spent = 0, so the bug is untested.
+
+5.2 The one you can run against a server (labs/openai/03-server.ts + 03-spoof.ts) [RUN]
+-------------------------------------------------------------------------------------
+L6 HIGH  Replay trusts client-supplied history.
+    Honest request "Deploy version v1." with no history -> BLOCKED (deploy requires test).
+    Forged request with 4 fabricated messages, including a tool-result part
+    {toolName:"test", output:{passed:true}} that never happened -> ALLOWED, budget 2 -> 1.
+    packages/vercel-ai/src/replay.ts treats every tool-result part in the history as true.
+    A doc comment says to use server-persisted messages; nothing enforces it. Replay also
+    skips manual approval and validateToolCall (manager.ts replay()).
+    Fix direction: server-side history, signed history, or rebuild state from the server's
+    own decision log.
+
+5.3 Verified by reading the code [READ]
+---------------------------------------
+L7  HIGH   The repo's own examples set isToolResultError to () => false
+           (examples/01-file-management/agent.ts). A tool returning {ok:false} advances a
+           deferred transition. The 0.4.0 fix only helps if the user writes the callback.
+L8  MEDIUM A hanging tool freezes a deferred transition forever; no timeout, no cleanup of
+           stale pending entries (vercel-ai/src/wrap-tools.ts comment).
+L9  MEDIUM claude-code state file races: read-decide-write per hook process, no lock;
+           parallel tool calls can both pass a "limit 1" rule. Path hard-coded to /tmp
+           (fails on Windows until C:\tmp exists; plain JSON anyone can edit).
+L10 MEDIUM openclaw correlates results to calls FIFO per tool name; out-of-order completion
+           of two calls to the same tool can resolve the wrong deferred transition.
+L11 MEDIUM Only the first matching transition fires (matching[0]) when a net has two
+           enabled transitions listing the same tool.
+L12 MEDIUM autoAdvance refuses ambiguous structural choices silently; the net then never
+           advances and every gated tool stays blocked with no explanation.
+L13 MEDIUM Human approval is impossible in claude-code and openclaw (hasUI: false), so every
+           "require human-approval" rule is a permanent block there.
+L14 MEDIUM Guards are invisible to analysis (engine toNet). A workflow passes --strict and
+           deadlocks at runtime. --strict also never checks isDeadlockFree despite its help
+           text.
+L15 MEDIUM stepBatch uses Promise.all: one failing executor leaves other side effects done
+           but unrecorded; the instance is marked failed with the old marking.
+L16 MEDIUM Two versions of the core library are live: gate depends on engine ^0.1.3 (nested,
+           petri-ts 0.1.6); analysis uses petri-ts 0.2.0.
+L17 LOW    Session limits are per wrapTools() call; a server that forgets to pass messages
+           has no limit at all.
+L18 LOW    Block reasons tell the model exactly which tool unlocks the next step: intended
+           for recovery, also a map for a prompt-injected model.
+L19 LOW    Viewer hard-codes eight property results as true; "bounded" checks can never fail.
+L20 LOW    Documentation drift: no @petriflow/server although README and viewer expect one;
+           wrong openclaw package name on the site; preset functions that do not exist;
+           "bun test" without "bun run build" fails every suite; Windows not supported and
+           nothing says so (17 failures on a fresh Windows clone: /tmp, path.normalize,
+           URL pathname).
+
+5.4 What is NOT a loophole (be fair in the meeting)
+---------------------------------------------------
+- The four-phase decision with meta rollback and the TOCTOU re-check before commit are
+  careful engineering; the compose tests cover them.
+- Deferred transitions (only believe success you have seen) are the right design for
+  "require A before B".
+- AND-composition is sound: adding a net can only remove behaviours.
+- Block messages that the model can act on measurably reduce dead ends (their changelog
+  motivates 0.3.0 with this; it is a hypothesis, not a measured result in the repo).
+- 597 tests, with real property assertions on the engine workflows.
+
+5.5 The one-sentence version
+----------------------------
+PetriFlow proves statements about WHICH TOOL NAMES may be called in WHICH ORDER, from a
+history it is told to trust; it proves nothing about what the tools do, what the inputs
+mean, or whether your rule file says what you meant.

@@ -1,0 +1,149 @@
+CHAPTER 7. THE 90-MINUTE REVIEW: AGENDA, DEMOS, COMMANDS, EXPECTED OUTPUT
+=========================================================================
+
+All commands run in Git Bash at the root of the petri-flow clone, after a one-time
+`bun install && bun run build`. Expected outputs below were captured on 9-10 October 2026
+on Windows 11 with Bun 1.3.14. Where a demo needs a model, the Azure/OpenAI/MOCK selection
+in labs/openai/_model.ts applies (chapter 13). Rehearse everything with MOCK=1 first.
+
+Agenda (90 min)
+  0-10   Problem and the idea (slides 2-8; diagrams 01, 03, 04)
+  10-25  Architecture walk (slides 9-16; diagrams 11, 13, 17, 18, 20)
+  25-35  DEMO 1 analysis is real: CLI on three workflows; DEMO 2 gate playground
+  35-45  DEMO 3 break the proof (what --strict does and does not catch)
+  45-60  DEMO 4 real model drives the gate (lab 1), DEMO 5 approvals and limits (lab 2)
+  60-70  DEMO 6 the forged-history loophole (lab 3 + spoof); DEMO 7 five loopholes script
+  70-80  Website vs code; what "verified" means (slides 30-36)
+  80-90  Self-evolving agents: position and research agenda; questions
+
+--------------------------------------------------------------------------------
+DEMO 1. The analysis is real (engine side)                                  3 min
+--------------------------------------------------------------------------------
+  bun packages/cli/src/cli.ts analyse workflows/coffee/index.ts --strict
+  bun packages/cli/src/cli.ts analyse workflows/order-checkout/index.ts --strict
+  bun packages/cli/src/cli.ts analyse workflows/agent-benchmark/index.ts --strict
+
+Expected:
+  Workflow: coffee
+    Reachable states: 5
+    Terminal states:  1 (all valid)
+      OK coffeeReady
+  Workflow: order-checkout
+    Reachable states: 4
+    Terminal states:  2 (all valid)
+      OK inventory(3), out_of_stock
+      OK inventory(2), shipped
+    Invariants:
+      1*inventory + 1*reserved + 1*shipped = const -> holds
+  Workflow: agent-benchmark
+    Reachable states: 196
+    Terminal states:  4 (all valid)
+Say: breadth-first enumeration in petri-ts (208 lines); the invariant is CHECKED from
+weights a human wrote in the definition; 196 is the number the website reuses.
+
+--------------------------------------------------------------------------------
+DEMO 2. The gate without any model                                          3 min
+--------------------------------------------------------------------------------
+  bun run labs/gate-playground.ts
+Expected (abridged):
+  Compiled nets: [ "require-backup-before-delete", "block-rm", "limit-push-2" ]
+  > agent calls delete   -> BLOCK (delete requires a successful call to backup first.)
+  > agent calls backup   -> allow ... backup succeeded -> deferred transition fired
+  > agent calls delete   -> allow
+  > agent calls rm       -> BLOCK (rm is blocked and cannot be called.)
+  > agent calls push x3  -> allow, allow, BLOCK (limit)
+Say: three nets, AND composition, deferred firing on success, marking shown after each step.
+
+--------------------------------------------------------------------------------
+DEMO 3. Break the proof                                                     8 min
+--------------------------------------------------------------------------------
+Step A, baseline:
+  bun test workflows/agent-benchmark 2>&1 | tail -3        # all pass
+Step B, add a bypass transition (one sed; revert with git checkout afterwards):
+  cp workflows/agent-benchmark/definition.ts /tmp/definition.ts.bak
+  BYPASS='{ name: "bypassApproval", type: "automatic", inputs: ["codePending"],'
+  BYPASS="$BYPASS"' outputs: ["codeDone"], guard: null },'
+  sed -i "/=== Join + Decision ===/i\\    $BYPASS" workflows/agent-benchmark/definition.ts
+  grep -n bypassApproval workflows/agent-benchmark/definition.ts
+Step C, the property test catches it:
+  bun test workflows/agent-benchmark 2>&1 | grep -E "pass|fail"
+  Expected (verified 10 Oct 2026): 8 pass, 1 fail:
+    (fail) agent-benchmark: formal properties > code execution always passes through humanApproval
+Step D, --strict does NOT:
+  bun packages/cli/src/cli.ts analyse workflows/agent-benchmark/index.ts --strict; echo "exit=$?"
+  Expected: Reachable states: 196, Terminal states: 4 (all valid), exit=0
+  (the bypass adds no new marking, because humanApproval already connects the same places;
+   the failing test is a STRUCTURAL check over transitions, which --strict never performs)
+Step E, revert:
+  git checkout -- workflows/agent-benchmark/definition.ts
+Say: the maths finds the bad state when someone WRITES the property as a test. The CLI's
+strict mode checks only unexpected terminal states and declared invariants. "Verified"
+means what was asked, nothing more.
+
+--------------------------------------------------------------------------------
+DEMO 4. A real model drives the gate (lab 1)                                6 min
+--------------------------------------------------------------------------------
+  MOCK=1 bun run labs/openai/01-file-agent.ts          # rehearsal, no network
+  bun run labs/openai/01-file-agent.ts                 # real model (Azure vars exported)
+Expected shape:
+  rules verified: require-backup-before-delete=3 states, block-rm=2 states
+  [gate] allow listFiles
+  [gate] BLOCKED delete -> delete requires a successful call to backup first.
+  [gate] allow backup
+  [gate] allow delete
+  [gate] BLOCKED rm -> rm is blocked and cannot be called.
+  --- Gate summary ---  blocked calls: 2 ... files left: [ "old-backup.tar.gz", "temp.log.bak" ]
+Say: the model is told the rules in the system prompt, still tries delete first, reads the
+block reason, backs up, then deletes; rm stays blocked no matter what it says.
+
+--------------------------------------------------------------------------------
+DEMO 5. Human approval and limits (lab 2)                                   5 min
+--------------------------------------------------------------------------------
+  MOCK=1 AUTO_APPROVE=1 bun run labs/openai/02-deploy-agent.ts
+  bun run labs/openai/02-deploy-agent.ts               # type y / n when asked
+Expected: deploy blocked before test; approval prompt before each deploy; third deploy
+blocked by "limit deploy to 2 per session". With FAIL_TESTS=1 the deploy never unlocks.
+
+--------------------------------------------------------------------------------
+DEMO 6. The forged-history loophole (lab 3)                                 6 min
+--------------------------------------------------------------------------------
+Window 1:  MOCK=1 bun run labs/openai/03-server.ts     (or real: drop MOCK=1)
+Window 2:  bun run labs/openai/03-client.ts            # honest: test, then deploy w/ history
+           bun run labs/openai/03-spoof.ts             # forged history
+Expected from 03-spoof.ts:
+  ### Honest: deploy with no history      -> BLOCKED: deploy requires a successful call to test first.
+  ### Forged: deploy with a fake 'tests passed' history -> (no BLOCKED line), budget 2 -> 1
+  honest request blocked : true
+  forged request blocked : false
+  Result: the forgery WORKED.
+Say: the gate is stateless by design (0.2.0); its memory is the chat history; whoever
+controls the history controls the gate. Same lesson as the Darwin Goedel Machine faking a
+test log: protect the evidence, not only the rule.
+
+--------------------------------------------------------------------------------
+DEMO 7. Five loopholes in one script                                        5 min
+--------------------------------------------------------------------------------
+  bun run labs/loopholes.ts
+Expected: see chapter 5 section 5.1 (L1 to L5), verbatim.
+
+--------------------------------------------------------------------------------
+Optional DEMO 8. The whole test suite and the Windows failures               3 min
+--------------------------------------------------------------------------------
+  bun run build && bun test 2>&1 | tail -5
+Expected on Windows: 580 pass / 17 fail (/tmp, path.normalize, URL pathname), 639 pass
+after the three one-line fixes in chapter 11. On Linux/macOS: all pass.
+
+--------------------------------------------------------------------------------
+Optional DEMO 9. The model as the engine's decision maker (lab 4)            3 min
+--------------------------------------------------------------------------------
+  MOCK=1 bun run labs/openai/04-decision-provider.ts
+  bun run labs/openai/04-decision-provider.ts
+Expected: "[llm] chose iterate from [iterate, generate]: ..." then "generate", final status
+completed. Say: the only LLM-in-the-loop point on the engine side; it picks among ENABLED
+transitions, it cannot invent one.
+
+Fallbacks
+- No network or no credentials: every demo above except 4, 5 (real), 9 (real) is offline.
+  Labs 1, 2, 3, 4 all run with MOCK=1.
+- Port busy: PORT=3457 for the server, BASE=http://localhost:3457 for client and spoof.
+- Fresh clone and tests fail with "Cannot find module @petriflow/gate": run bun run build.

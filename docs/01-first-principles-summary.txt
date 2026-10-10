@@ -1,0 +1,65 @@
+CHAPTER 1. FIRST PRINCIPLES IN TEN MINUTES
+==========================================
+(The long version, with every diagram, is docs/10-full-guide-explained-from-zero.txt and
+pdf/PetriFlow_Explained_From_Zero.pdf. Diagrams: diagrams/00 to 10.)
+
+1.1 The problem
+---------------
+An AI agent is a model in a loop: read task, choose a tool, call it, read the result, choose
+again. Tools have side effects (delete, deploy, send). The model's choices are not
+guaranteed. Four common controls all leak:
+  prompts        a suggestion, not a wall
+  deny lists     never complete (block rm, miss find -delete)
+  if-statements  live in the tool code, know nothing about ORDER across tools
+  human approval of everything   nobody reads the 40th dialog
+The missing piece is a component BETWEEN the model and the tools that knows the history of
+calls and decides from it. (diagram 01)
+
+1.2 The second problem: trusting the gate
+-----------------------------------------
+If the gate is itself a pile of if-statements, you are back where you started. You want a
+gate whose policy you can inspect completely before anything runs. That is the reason for
+the Petri net: a policy small enough to enumerate every state it can be in.
+
+1.3 Petri nets in one paragraph
+-------------------------------
+Places are cups. Tokens are marbles in cups. A transition is a machine that needs marbles in
+all its input cups, takes them, and puts marbles in its output cups. The marking is the
+count in every cup: the whole state. A transition is enabled when its inputs are filled.
+Reachable states are every marking you can get to by firing enabled transitions in any
+order. A terminal state is one where nothing can fire: fine if it is the intended end, a
+deadlock otherwise. An invariant is a weighted count of marbles that never changes.
+(diagrams 02, 03, 04, 05)
+
+Why not a state machine or a DAG? A state machine has one marble; it cannot say "heat water
+AND grind beans, in either order, then pour". A DAG has no tokens, so it cannot express a
+budget, a lock, or "once per X". Petri nets do both with the same five words.
+
+1.4 The trick: a rule becomes a shape
+-------------------------------------
+  require A before B            idle -> A fires (deferred) -> gate -> B fires -> idle. 3 states
+  require human-approval before B   a MANUAL transition on a self-loop. 2 states
+  block A                       A's transition reads from a cup that can never fill. 2 states
+  limit A to N per session      a budget cup with N marbles. N+2 states
+  limit A to N per X            budget plus a spent cup and a refill fired by X. N+2 states
+  map tool.field /regex/ as name  renames a tool by its input before any net looks at it
+Rules compose by AND: a call is allowed only if every net that has an opinion says yes.
+Each net is tiny, so each is enumerated in microseconds. (diagrams 06 to 10, 15)
+
+1.5 The two things the project is
+---------------------------------
+A workflow ENGINE (define a net with guards and executors, run it with a scheduler and
+SQLite, analyse it with a CLI) and a tool GATE (SkillNets + GateManager + adapters + a rules
+DSL). Both sit on the external petri-ts library, where the mathematics lives. (diagram 11)
+
+1.6 The history in one line per release (from CHANGELOG)
+--------------------------------------------------------
+0.1.0 engine first, then the gate and presets; 0.2.0 the gate becomes stateless (state in
+the caller's session); 0.3.0 block messages the model can act on, ruleMetadata; 0.3.1 replay
+from message history; 0.4.0 "failed" is not always an exception (isToolResultError).
+(diagram 12)
+
+1.7 What to keep in mind for the rest of the chapters
+-----------------------------------------------------
+The gate sees tool NAMES and ORDER. It does not see what tools do, what inputs mean, or
+whether the history it replays is true. Everything in chapters 4 and 5 follows from that.

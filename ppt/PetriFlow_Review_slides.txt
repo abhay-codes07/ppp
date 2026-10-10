@@ -1,0 +1,520 @@
+PetriFlow review deck: slide titles, content and speaker notes
+Generated 10 October 2026. Paste into PowerPoint alongside ppt/slides/SlideNN.PNG.
+
+==============================================================================
+SLIDE 1: PetriFlow, reviewed
+------------------------------------------------------------------------------
+  A Petri-net tool gate for AI agents: how it works, what it proves, where it leaks, and what it means for self-evolving agents
+  90 minutes: 7 live demos, 45 diagrams, every claim points at a file or a run
+  Source: github.com/joshuaisaact/petri-flow (MIT, commit dcd6196), read and run on 8-10 October 2026
+  AI tools assisted the reading; every output in this deck was re-executed or re-read by hand
+
+  NOTES: Open with the one-line verdict: a real, small, well-engineered runtime gate whose 'formally verified' marketing is one step ahead of its code. Then say what the audience will be able to judge for themselves by the end.
+
+==============================================================================
+SLIDE 2: Agenda
+------------------------------------------------------------------------------
+  0-10   The problem, and Petri nets in five minutes
+  10-25  Architecture: two products, one library, five adapters
+  25-45  Demos 1-3: analysis is real, the gate without a model, break the proof
+  45-70  Demos 4-7: a real model drives the gate, approvals, forged history, five loopholes
+  70-80  Website vs code: what 'verified' means here
+  80-90  Self-evolving agents: where this sits, what to research
+
+  NOTES: Everything runs offline except demos 4, 5 and 9 which use the Azure OpenAI deployment; each has a MOCK=1 twin.
+
+==============================================================================
+SLIDE 3: PART 1. The problem, and the idea
+------------------------------------------------------------------------------
+  Why a tool gate, and why a Petri net for the policy
+
+==============================================================================
+SLIDE 4: Where should the rule live?
+------------------------------------------------------------------------------
+  [diagram: 01-where-the-rule-lives.png]
+  Prompts, deny lists and if-statements each leak. PetriFlow puts the rule between the model and the tools.
+  Prompt: a suggestion, not a wall
+  Deny list: never complete
+  If-statement in a tool: knows nothing about order across tools
+  Approve everything: nobody reads the 40th dialog
+  The gap: a component that knows the HISTORY of calls
+
+  NOTES: Frame it as an ordering problem: 'backup before delete' is a statement about two different tools over time. None of the usual controls have a memory across tools.
+
+==============================================================================
+SLIDE 5: Petri nets in sixty seconds
+------------------------------------------------------------------------------
+  [diagram: 03-coffee-net.png]
+  Places are cups, tokens are marbles, transitions are machines. The marking is the whole state.
+  Enabled: every input cup has a marble
+  Fire: take inputs, put outputs
+  Two branches in either order, then a join
+  A state machine cannot say AND; a DAG has no tokens, so no budgets or locks
+
+  NOTES: This is workflows/coffee/definition.ts, 80 lines. The join needs three marbles at once: that is the thing DAGs cannot express.
+
+==============================================================================
+SLIDE 6: Every possible future: reachability
+------------------------------------------------------------------------------
+  [diagram: 04-coffee-reachability.png]
+  Breadth-first search over markings. Coffee has 5 states and one terminal state.
+  Reachable states = all markings you can get to
+  Terminal state = nothing can fire (end, or deadlock)
+  Invariant = a weighted token count that never changes
+  This enumeration is the whole 'proof' machinery
+
+  NOTES: Say explicitly: the proof technique in this project is exhaustive enumeration of small nets. Nothing symbolic. That is fine for 3-200 states.
+
+==============================================================================
+SLIDE 7: The trick: a rule becomes a shape
+------------------------------------------------------------------------------
+  [diagram: 06-rule-require-before.png]
+  'require A before B' compiles to three cups and three machines. Reachable states: 3.
+  human-approval: a MANUAL transition, 2 states
+  block A: reads from a cup that never fills, 2 states
+  limit A to N: a budget cup, N+2 states
+  map tool.field /regex/ as name: rename by input
+  Rules compose by AND across independent nets
+
+  NOTES: Each template was designed by hand. The compiler counts states; the templates carry the guarantee. Keep this sentence, it returns in part 4.
+
+==============================================================================
+SLIDE 8: Composition by intersection
+------------------------------------------------------------------------------
+  [diagram: 10-rules-compose.png]
+  Two nets that do not know each other. A call passes only if every net with an opinion says yes.
+
+  NOTES: Sound: adding a net can only remove behaviours. Not analysed as a whole: demo 7, loophole 3.
+
+==============================================================================
+SLIDE 9: PART 2. Architecture
+------------------------------------------------------------------------------
+  Two products in one repo, one external library, five adapters
+
+==============================================================================
+SLIDE 10: Two products, one library
+------------------------------------------------------------------------------
+  [diagram: 11-package-layers.png]
+  petri-ts (208 lines, external) holds all the mathematics. Engine and gate are built on it.
+  Engine: defineWorkflow, guards, executors, Scheduler, SQLite, CLI analyse
+  Gate: SkillNet, GateManager, four-phase decision, replay
+  Rules: five templates to SkillNets
+  Adapters: vercel-ai, agent-sdk, claude-code, openclaw, pi
+  Gate depends on engine ^0.1.3: a nested older copy with petri-ts 0.1.6 is live at runtime
+
+  NOTES: The dependency quirk is verified: packages/gate/node_modules/@petriflow/engine is 0.1.3 and bundles petri-ts 0.1.6 while analysis uses 0.2.0. Harmless for these nets, but two copies of the core maths in one install is a smell.
+
+==============================================================================
+SLIDE 11: File map: what each package is
+------------------------------------------------------------------------------
+  Package | Lines (src) | Role | Tests
+  petri-ts (external) | 208 | canFire, fire, reachableStates (BFS, cap 10000), terminalStates, checkInvariant, analyse | n/a
+  engine | ~1,700 | defineWorkflow, toNet (strips guards), analyse, executor + DecisionProvider, Scheduler, sqliteAdapter | 125
+  gate | ~880 | SkillNet types, classifyNets, composedToolCall (4 phases), autoAdvance, manager, replay | 107
+  rules | ~440 | parse 5 statements, compile templates, buildToolMapper, verifyNets (counts only) | 67
+  vercel-ai | ~380 | wrapTools, extractReplayEntries, ToolCallBlockedError | 64
+  agent-sdk / claude-code / openclaw / pi-extension / pi-assistant | ~1,500 | hooks and plugins; hand-written nets with validateToolCall and meta | 137
+  cli | ~170 | petriflow analyse <file> [--dot|--json|--strict] | 4
+  workflows / examples / comparisons |  | 6 workflows, 5 examples, n8n + openclaw scenario comparisons | 135
+
+  NOTES: Total 597 tests. 'bun test' on a fresh clone fails until 'bun run build' because packages import each other through dist/.
+
+==============================================================================
+SLIDE 12: One tool call, end to end
+------------------------------------------------------------------------------
+  [diagram: 13-tool-call-journey.png]
+  Four phases: classify, approvals, validate with meta rollback, commit with a re-check.
+  Phase 1 per net: free / abstain / gated / blocked
+  Any blocked wins; reason text goes to the model
+  Phase 2: manual transitions need ctx.confirm; no UI means block
+  Phase 3: validateToolCall, meta rolled back on reject
+  Phase 4: re-check canFire (TOCTOU), fire or mark pending
+
+  NOTES: packages/gate/src/compose.ts lines 86-187. This is careful code; the compose tests cover rollback and the TOCTOU re-check. Credit where due.
+
+==============================================================================
+SLIDE 13: Deferred transitions: only believe success you saw
+------------------------------------------------------------------------------
+  [diagram: 14-deferred-transition.png]
+  The call is allowed, the net fires only when the tool RESULT is a success.
+  backup is deferred: delete unlocks after backup succeeded
+  Error result: pending entry dropped, nothing fires
+  isToolResultError lets {ok:false} count as failure (0.4.0)
+  No timeout: a hanging tool leaves a pending entry forever
+
+  NOTES: Design is right. Two caveats return as loopholes: examples set isToolResultError to () => false, and nothing expires a pending entry.
+
+==============================================================================
+SLIDE 14: The rules compiler
+------------------------------------------------------------------------------
+  [diagram: 17-rules-pipeline.png]
+  Text to verified nets in five steps, one file of 439 lines.
+  parseLine: map / require / require human-approval / limit / block
+  One template per statement, each a SkillNet
+  buildToolMapper: regex + dot notation
+  verifyNets: analyse each net, keep ONLY the state count
+
+  NOTES: Open compiler.ts lines 388-396 live if asked: the deadlock flag and terminal states petri-ts computed are discarded.
+
+==============================================================================
+SLIDE 15: Five adapters, one core
+------------------------------------------------------------------------------
+  [diagram: 18-adapters.png]
+  The core never imports a framework. Each adapter turns framework events into GateToolCall / GateToolResult.
+  vercel-ai: wrap execute; state rebuilt from messages
+  agent-sdk: in-process hooks
+  claude-code: new process per event, JSON in /tmp
+  openclaw: no call ids, FIFO matching per tool
+  pi: in-process, hand-written nets
+
+  NOTES: State handling differs per adapter and is where most medium loopholes live (part 5).
+
+==============================================================================
+SLIDE 16: The engine tick
+------------------------------------------------------------------------------
+  [diagram: 20-scheduler-tick.png]
+  Timeouts, step or stepBatch (guards here, DecisionProvider if several enabled), persist with a version check.
+
+  NOTES: The engine is the more complete half: SQLite persistence with optimistic versioning, timeouts, batch execution. The gate has none of that.
+
+==============================================================================
+SLIDE 17: PART 3. Live demos
+------------------------------------------------------------------------------
+  Seven runs. Every expected output below was captured on 9-10 October 2026.
+
+==============================================================================
+SLIDE 18: Demo 1: the analysis is real (CLI)
+------------------------------------------------------------------------------
+  bun packages/cli/src/cli.ts analyse workflows/coffee/index.ts --strict
+    Reachable states: 5    Terminal states: 1 (all valid)  OK coffeeReady
+  bun packages/cli/src/cli.ts analyse workflows/order-checkout/index.ts --strict
+    Reachable states: 4    Terminal states: 2 (all valid)
+    Invariants: 1*inventory + 1*reserved + 1*shipped = const -> holds
+  bun packages/cli/src/cli.ts analyse workflows/agent-benchmark/index.ts --strict
+    Reachable states: 196  Terminal states: 4 (all valid)
+  The invariant is CHECKED from weights written in the workflow definition. 196 is the number the website reuses on its landing page.
+
+  NOTES: Point at petri-ts reachableStates: a queue, a seen-set, fire everything enabled. Then: invariants are checked, never discovered.
+
+==============================================================================
+SLIDE 19: Demo 2: the gate without any model
+------------------------------------------------------------------------------
+  [diagram: 35-gate-playground.png]
+  bun run labs/gate-playground.ts: three rules, a scripted sequence of calls, marking after each step.
+  delete -> BLOCKED (needs backup)
+  backup -> allow, deferred; result OK -> fires
+  delete -> allow; delete again -> BLOCKED
+  rm -> BLOCKED always
+  push x3 -> allow, allow, BLOCKED (limit 2)
+
+  NOTES: No network, no key. Shows AND composition and deferred firing in 40 lines.
+
+==============================================================================
+SLIDE 20: Demo 3: break the proof
+------------------------------------------------------------------------------
+  [diagram: 37-break-the-proof.png]
+  Add a bypassApproval transition to agent-benchmark. One property test fails. petriflow analyse --strict still exits 0.
+  bun test workflows/agent-benchmark: 8 pass, 1 fail
+  'code execution always passes through humanApproval' fails
+  --strict: 196 states, all valid, exit 0
+  Verified means: what someone wrote down as a property
+
+  NOTES: Verified again on 10 Oct 2026. The failing test is a structural check over transitions; strict mode checks only unexpected terminal states and declared invariants. Revert with git checkout.
+
+==============================================================================
+SLIDE 21: Demo 4: a real model drives the gate (lab 1)
+------------------------------------------------------------------------------
+  [diagram: 42-lab1-file-agent.png]
+  require backup before delete, block rm. Five tools on a scratch folder. Azure OpenAI or MOCK=1.
+  Model tries delete first -> blocked with a reason
+  Reads the reason, calls backup, then delete
+  rm stays blocked whatever it says
+  Gate summary: blocked calls 2, files left: old-backup.tar.gz, temp.log.bak
+
+  NOTES: labs/openai/01-file-agent.ts. Provider chosen by env: MOCK=1, else AZURE_OPENAI_ENDPOINT (service principal), else OPENAI_API_KEY.
+
+==============================================================================
+SLIDE 22: Demo 5: approvals and limits (lab 2)
+------------------------------------------------------------------------------
+  [diagram: 43-lab2-deploy-agent.png]
+  lint -> test -> deploy, human approval before deploy, limit deploy to 2 per session.
+  y/n prompt in the terminal before each deploy
+  Third deploy blocked by the limit
+  FAIL_TESTS=1: deploy never unlocks
+  AUTO_APPROVE=1 for unattended rehearsal
+
+  NOTES: Shows phase 2 (manual transition) in front of the audience.
+
+==============================================================================
+SLIDE 23: Demo 6: the forged-history loophole (lab 3)
+------------------------------------------------------------------------------
+  [diagram: 44-lab3-server-replay.png]
+  The server is stateless; it rebuilds the gate from the chat history the CLIENT sends.
+  Honest: deploy with no history -> BLOCKED
+  Forged: 4 fabricated messages incl. a fake 'test passed' result -> ALLOWED
+  replay.ts trusts every tool-result part
+  Whoever controls the history controls the gate
+
+  NOTES: labs/openai/03-spoof.ts, verified against the mock server. Same lesson as the Darwin Goedel Machine faking a test log: protect the evidence, not only the rule.
+
+==============================================================================
+SLIDE 24: Demo 7: five loopholes in one script (bun run labs/loopholes.ts)
+------------------------------------------------------------------------------
+  # | Rule | What happens | Why
+  L1 | require backup before delete | backup(readme.txt) then delete(production.db): both allowed | Names, not data
+  L2 | map bash.command rm as delete; block delete | rm -rf blocked; find -delete and shutil.rmtree allowed | Regex is a deny list
+  L3 | require a before b; require b before a | compile() reports 3+3 states; a and b both blocked forever | Composition never analysed
+  L4 | limit push to 2 per session | two FAILED pushes spend the budget; third blocked | Limit is not deferred
+  L5 | limit whatsapp.send to 1 per whatsapp.lookup | first lookup BLOCKED (site says OK) | Refill needs a 'spent' token
+
+  NOTES: All five outputs are reproduced verbatim in docs/05. L5 contradicts the website's own landing-page trace.
+
+==============================================================================
+SLIDE 25: PART 4. Is the mathematics real?
+------------------------------------------------------------------------------
+  Or is 'Petri net' a fancy word on top of a wrapper?
+
+==============================================================================
+SLIDE 26: What is real, what is missing
+------------------------------------------------------------------------------
+  Real and standard:
+    Place/transition nets with multiplicity (canFire counts)
+    Reachability graph by BFS; terminal states; deadlock flag
+    Invariant CHECKING from user-supplied weights
+    True concurrency (both interleavings reachable)
+    Runtime gate = enabled-transition rule on the marking
+    AND composition is sound
+  Not there:
+    No invariant COMPUTATION (no incidence matrix)
+    No boundedness decision: throws at 10,000 states
+    No liveness, no temporal logic, no model checker
+    Guards stripped before analysis (over-approximation)
+    Rules path keeps only the state COUNT
+    Composition never analysed; meta/validators invisible
+
+  NOTES: Keep the tone factual. The semantics are textbook. The analysis is minimal. The vocabulary is the problem.
+
+==============================================================================
+SLIDE 27: Where the mathematics lives
+------------------------------------------------------------------------------
+  All of it is in petri-ts: 208 lines. This repository implements no analysis algorithm.
+  The gate imports only canFire and fire. It never calls reachableStates, analyse or checkInvariant. Its guard field is declared and never evaluated.
+
+  NOTES: packages/gate/src/*.ts imports: canFire, fire. That is the whole runtime relationship to the maths.
+
+==============================================================================
+SLIDE 28: verifyNets: what 'mathematically verified' means for a rule
+------------------------------------------------------------------------------
+  // packages/rules/src/compiler.ts, lines 388-396
+  function verifyNets(nets: SkillNet<string>[]): NetVerification[] {
+    return nets.map((net) => {
+      const result = analyse(toPetriNet(net));
+      return {
+        name: net.name,
+        reachableStates: result.reachableStateCount,
+      };
+    });
+  }
+  petri-ts also returned isDeadlockFree, terminalStates and invariants. They are discarded. This function cannot fail.
+  toPetriNet drops tools, manual/auto, deferred, toolMapper, validateToolCall, meta
+  Each net alone, never the AND of all nets
+  'verified' = 'we counted 3 states'
+
+  NOTES: This is the single most important slide for the 'fancy word' question. Read it slowly.
+
+==============================================================================
+SLIDE 29: The scope of the proof
+------------------------------------------------------------------------------
+  [diagram: 24-proof-scope.png]
+  The rails are proven; the driver is not. BENCHMARK.md says this itself.
+  Proven: which tool NAMES may be called in which ORDER
+  Not proven: what tools do, what inputs mean, whether the rule file says what you meant
+  Not proven: anything that depends on a guard or on meta
+
+  NOTES: Quote their own BENCHMARK.md: the net constrains the orchestration, not the LLM's decisions.
+
+==============================================================================
+SLIDE 30: Website versus code
+------------------------------------------------------------------------------
+  The site says | The code | Where
+  $ petriflow verify ... invariant 'no unguarded delete' PASS, 0 violations across 196 states | No verify command; CLI has only analyse. Rules path checks no invariant. 196 is the benchmark workflow | cli.ts:25-27; compiler.ts:388-396
+  Layer 1 presets: backupBeforeDelete(), observeBeforeSend(), testBeforeDeploy() | Do not exist anywhere in the code | grep; only CHANGELOG 0.1.0
+  import from @petriflow/openclaw | Package is named @petriflow/petriflow-gate | packages/openclaw/package.json
+  Tutorials use openai('gpt-4o') | Linked examples use Anthropic; no OpenAI dependency in examples/ | examples/*/agent.ts
+  WhatsApp trace: 'Agent calls lookup -> OK' | First lookup is BLOCKED (loophole L5) | labs/loopholes.ts
+  'Formally verified. Structurally enforced.' | Enumerated for size; enforced at runtime; verified only where a human wrote a test | this deck
+  Tutorial 5: deadlock-free, token conservation, terminal states | Really computed by examples/05-openclaw-ops/verify.ts | the one justified case
+
+  NOTES: Be fair: the last row shows where the proof language is earned. The rest is marketing ahead of code.
+
+==============================================================================
+SLIDE 31: Running the website's example on a company laptop
+------------------------------------------------------------------------------
+  [diagram: 51-provider-plug.png]
+  The model is a plug. labs/openai/_model.ts picks MOCK, Azure OpenAI (service principal) or OpenAI from the environment. Nothing under packages/ changes.
+  Same two rules and five tools as Tutorial 1
+  Windows-safe paths, inline rules (no URL.pathname bug)
+  AZURE_OPENAI_ENDPOINT + DEPLOYMENT + TENANT/CLIENT/SECRET
+  MOCK=1 twin for every lab
+  Verified: typecheck, mock runs, Entra path with fake credentials (AADSTS90002)
+
+  NOTES: docs/13 has the full Azure setup, the diff and a Copilot prompt. Not verified with real credentials on the authoring machine; verified on the company laptop by the presenter.
+
+==============================================================================
+SLIDE 32: PART 5. Loopholes
+------------------------------------------------------------------------------
+  Ranked, and each one marked RUN (reproduced) or READ (from source)
+
+==============================================================================
+SLIDE 33: Where the holes sit on the journey
+------------------------------------------------------------------------------
+  [diagram: 25-loophole-map.png]
+  Names not reality; state wrong or lost; quiet behaviours; engine side; documentation drift.
+
+  NOTES: Use this as the map, then the two tables.
+
+==============================================================================
+SLIDE 34: HIGH: a rule can be bypassed
+------------------------------------------------------------------------------
+  # | Loophole | Evidence
+  L1 | Any backup unlocks any delete: the DSL has no data awareness | RUN labs/loopholes.ts
+  L2 | Tool mapping is a regex; find -delete, shutil.rmtree pass | RUN labs/loopholes.ts
+  L6 | Replay trusts client-supplied history: forged 'test passed' unlocks deploy | RUN labs/openai/03-spoof.ts
+  L7 | Repo examples set isToolResultError to () => false: {ok:false} counts as success | READ examples/01/agent.ts
+
+  NOTES: L6 is the one to dwell on: it is a design consequence of 'stateless gate', not a typo.
+
+==============================================================================
+SLIDE 35: MEDIUM and LOW
+------------------------------------------------------------------------------
+  # | Loophole | Evidence
+  L3 | Mutually blocking rules pass 'verification' (composition never analysed) | RUN
+  L5 | Per-action limit blocks the refill action while budget is full (site trace wrong) | RUN
+  L8 | Hanging tool freezes a deferred transition; no timeout or cleanup | READ wrap-tools.ts
+  L9 | claude-code: /tmp JSON, read-modify-write without lock; parallel calls beat 'limit 1' | READ state.ts, hook.ts
+  L10 | openclaw: FIFO matching per tool name; out-of-order results resolve the wrong call | READ openclaw/src/index.ts
+  L11/12 | First matching transition wins; autoAdvance stops silently on ambiguity | READ compose.ts, advance.ts
+  L13 | Human approval impossible in claude-code and openclaw (hasUI false): permanent block | READ
+  L14 | Guards invisible to analysis; --strict never checks isDeadlockFree despite its help text | READ toNet, cli.ts
+  L16 | Two versions of the core library live at once (gate -> engine 0.1.3 -> petri-ts 0.1.6) | READ node_modules
+  L4/17/18/19/20 | Limits count attempts; per-call session limits; block text guides injected models; viewer hard-codes 8 'holds: true'; docs drift, Windows unsupported | RUN/READ
+
+  NOTES: docs/05 has each item with file paths and the fix direction.
+
+==============================================================================
+SLIDE 36: What is NOT a loophole (fairness)
+------------------------------------------------------------------------------
+  Four-phase decision with meta rollback and a TOCTOU re-check: careful, tested engineering
+  Deferred transitions are the right design for 'require A before B'
+  AND composition is sound: a new net can only remove behaviours
+  Block messages the model can act on: a sensible hypothesis (not measured in the repo)
+  597 tests, with real enumeration-based property assertions on the engine workflows
+  One-sentence summary: it proves which tool NAMES may be called in which ORDER, from a history it is told to trust
+
+  NOTES: End part 5 on the sentence; it is the honest scope.
+
+==============================================================================
+SLIDE 37: PART 6. Self-evolving agents
+------------------------------------------------------------------------------
+  Where a static Petri-net gate sits relative to the 2025-2026 frontier, and what to research
+
+==============================================================================
+SLIDE 38: What 'self-evolving agent' means (two surveys)
+------------------------------------------------------------------------------
+  Gao et al. 2025/26 (arXiv:2507.21046, TMLR): WHAT evolves (weights, prompts/memory, tools, workflow), WHEN (in-task vs between tasks), HOW (reward, imitation, evolutionary)
+  Fang et al. 2025 (arXiv:2508.07407): a loop of inputs -> agent -> environment -> OPTIMISERS that rewrite prompts, memory, tools, workflows or the model
+  Working definition: a deployed agent that persistently changes a reusable part of itself from feedback on its own runs
+  Both surveys list verification and sandboxing only as FUTURE work
+
+  NOTES: All sources in research/sources.txt; the six most-used were re-fetched to confirm title and numbers.
+
+==============================================================================
+SLIDE 39: Landmark systems and what evolves
+------------------------------------------------------------------------------
+  System | What evolves | Result / note
+  Reflexion 2023 | episodic text memory | no weight updates
+  Voyager 2023 | a library of executable skills | lifelong Minecraft agent
+  ADAS 2024 / AFlow ICLR 2025 / MASS ICLR 2026 | whole agent as code / workflow graph / prompts + topology | search over designs
+  SICA 2025 | its own code | 17% -> 53% on a SWE subset
+  Darwin Goedel Machine 2025 (ICLR 2026) | its own codebase, archive of variants | SWE-bench 20.0 -> 50.0%; one run FAKED a test log and removed detection markers
+  AlphaEvolve 2025 | programs, picked by automated evaluators | the artefact evolves, not the agent
+  Huxley-GM, Hyperagents, Red Queen GM 2026 | selection by descendants; the meta-agent itself; agents AND their evaluators | the judge is now inside the loop
+  Lean4Agent / LeanEvolve 2026 | workflows revised from formal-verifier output | verifier output as the evolution signal
+
+  NOTES: DGM's faked log is the bridge to loophole L6: in both cases the agent corrupts the evidence the overseer trusts.
+
+==============================================================================
+SLIDE 40: Safety findings specific to self-evolution
+------------------------------------------------------------------------------
+  Misevolution (Shao et al., ICLR 2026): safety decays INSIDE the improvement loop, no attacker; four pathways: model, memory, tool, workflow
+  Benign experience still weakens safety; adding refusal experience causes over-refusal (Findings of ACL 2026)
+  Finance audit (arXiv:2608.17684): utility 0.741 -> 0.837 while injection exposure 0.820 -> 0.943
+  Verifier tax (Dantas et al., arXiv:2608.14590): blocking 94% of unsafe actions can leave < 5% safe task completion
+  Fixed monitors have entropy-bounded recall (arXiv:2608.01388): 68-75% on concentrated attacks, 6-13% on dispersed ones. Loophole L2 in theory
+  'Agent Safety Is Action Alignment' (arXiv:2606.28739): enforce least privilege at the action boundary, outside the weights. That is a tool gate
+
+  NOTES: These are the reasons a FIXED gate becomes more relevant as agents evolve, and also the limits of what it can claim.
+
+==============================================================================
+SLIDE 41: The neighbourhood: formal guardrails for LLM agents
+------------------------------------------------------------------------------
+  Work | Mechanism | Relation to PetriFlow
+  adk-libpetri (GitHub, 2026) | Google ADK agents compiled to Coloured Time Petri nets; Z3 proves deadlock-freedom before execution | closest relative; already has named, checked properties ('proofs are structural and untimed')
+  Czejdo et al., DepCoS 2026 | Petri-net reachability for LLM multi-agent synchronisation | same maths, academic
+  AgentSpec (ICSE 2026), Progent | trigger-predicate-enforcement DSLs at the tool boundary; Progent allows LLM-generated, dynamically updated policies | same job as the gate, richer predicates
+  VeriGuard (ACL 2026) | LLM drafts a policy as code, verified offline, light monitor online | the 'verify then enforce' split PetriFlow claims
+  ContrAgent, CaMeLoT, AgentLTL, Agent-C | LTLf/CTL specs compiled to automata or checked with nuXmv/SMT; gate tool calls or steer decoding | temporal properties PetriFlow cannot express
+
+  NOTES: PetriFlow's distinctive bits: the five-template DSL, deferred transitions, and adapters for five frameworks. Its verification story is behind these.
+
+==============================================================================
+SLIDE 42: Where PetriFlow stands
+------------------------------------------------------------------------------
+  It does not evolve, by design. That is orthogonal to the frontier, not behind it.
+  Grep for evolve / learn / adapt / improve finds nothing in the code. Rules compile once and run unchanged. The research shows safety eroding exactly in the parts that evolve, which makes a fixed gate outside the agent's edit scope more useful, if it can be trusted.
+
+  NOTES: Then pivot: to be that trusted component it needs three things it lacks today.
+
+==============================================================================
+SLIDE 43: Research agenda that connects the two
+------------------------------------------------------------------------------
+  # | Direction | What the repo already has | What is missing
+  R1 | Rules as the evolvable artefact under a verifier (accept a .rules edit only if composed net is deadlock-free and properties hold) | compile(), per-net enumeration | composed analysis; a property language
+  R2 | Monotone safety: adding a rule only tightens; when can a rule be REMOVED safely? | AND composition, addNet/removeNet | a theorem and a check
+  R3 | Reachability and block events as an evolution signal for AFlow/DGM-style search | onDecision events, analyse() | a harness
+  R4 | Evidence integrity: state from server-observed results, signed history | replay from messages | anything that stops L6
+  R5 | Data-aware rules (coloured nets): backup OF x before delete OF x | meta + validateToolCall in JS | DSL syntax and bounded-colour enumeration
+  R6 | Classification beyond regex, measured against the entropy bound | map statements | AST or sandbox classifier
+  R7 | Guard-aware analysis (SMT over filtrex) so --strict stops over-approximating | toNet, compileGuard | the solver
+  R8 | Measure the 0.3.0 claim: do marking-style block messages improve recovery? | formatBlockReason | an experiment
+
+  NOTES: R1, R2 and R4 are the ones that make the gate usable inside a self-evolving system. R5-R8 fix today's loopholes.
+
+==============================================================================
+SLIDE 44: Conclusions
+------------------------------------------------------------------------------
+  A real runtime gate: four-phase decision, deferred firing, AND composition, adapters for five frameworks. Small and readable
+  Real but minimal mathematics, all in a 208-line external library; the repo adds a terminal-state split and nothing symbolic
+  'Formally verified' on the website means 'state count per rule'. No verify command, no invariant check in the rules path, one wrong headline trace
+  Six loopholes reproduced by running code; the forged-history one is a design consequence of a stateless gate
+  Zero self-evolution in the repo, by design. The literature says that is where a fixed gate is needed, provided composition analysis, a property language and evidence integrity are added
+  Recommendation: use the DSL and gate for ordering constraints on tool names; do not cite it as formal verification; pick R1, R2, R4 as the research thread
+
+  NOTES: Close with the recommendation and invite the audience to run labs/loopholes.ts themselves.
+
+==============================================================================
+SLIDE 45: Appendix: run everything yourself
+------------------------------------------------------------------------------
+  git clone https://github.com/joshuaisaact/petri-flow && cd petri-flow
+  bun install && bun run build && bun test                    # 597 tests (17 Windows-only failures)
+  bun packages/cli/src/cli.ts analyse workflows/order-checkout/index.ts --strict
+  bun run labs/gate-playground.ts                             # demo 2
+  bun run labs/loopholes.ts                                   # demo 7
+  MOCK=1 bun run labs/openai/01-file-agent.ts                 # demo 4, no key
+  MOCK=1 bun run labs/openai/03-server.ts  &  bun run labs/openai/03-spoof.ts   # demo 6
+  export AZURE_OPENAI_ENDPOINT=... AZURE_OPENAI_DEPLOYMENT=... AZURE_TENANT_ID=... \
+         AZURE_CLIENT_ID=... AZURE_CLIENT_SECRET=...        # then drop MOCK=1
+  The labs/ folder, all chapters as text, all diagrams and the four long guides are in the companion repository (ppp).
+
+  NOTES: Verification status: everything in this deck was run on Windows 11, Bun 1.3.14, except the real-credential Azure path which the presenter verified on the company laptop.
+

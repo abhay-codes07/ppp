@@ -12,7 +12,7 @@ executing the command shown.
 
 ## How to use this repository
 
-1. Read `docs/` in order (plain text, chapter per file). Chapters 1 to 8 are the review;
+1. Read `docs/` in order (chapter per file). Chapters 1 to 9 are the review;
    chapters 10 to 13 are the four long guides as text.
 2. Open `pdf/` for the same material with diagrams laid out (GitHub renders PDFs).
 3. Open `ppt/PetriFlow_Review.pptx` (45 slides, 16:9, speaker notes inside), or copy
@@ -33,10 +33,11 @@ executing the command shown.
 | `docs/06-self-evolving-agents-research.txt` | 2025-2026 literature, where a static gate sits, research agenda R1-R8 |
 | `docs/07-demo-script-90-minutes.txt` | agenda, nine demos, commands, expected output |
 | `docs/08-real-run-and-commit-guide.txt` | real Azure run step by step, `labs/run-real.sh` to save the output, committing results to a company repo without leaking a credential |
+| `docs/09-test-suite-walkthrough.md` | the whole test suite on a fresh clone: commands, every test file, the source lines each exercises, the Windows failures and a reversible patch, what is not tested (also `pdf/PetriFlow_Test_Suite_Walkthrough.pdf`) |
 | `docs/10..13-full-guide-*.txt` | the four long guides (concepts, tests and workflows, LLM labs, Azure setup) as text |
 | `pdf/` | the same guides as PDFs, plus `PetriFlow_Review_Notes.pdf` (chapters 1-7 with diagrams) |
 | `ppt/` | the deck, slide PNGs, slide text with speaker notes |
-| `labs/` | `gate-playground.ts`, `loopholes.ts`, `run-real.sh` (runs everything, saves logs, redacts secrets), and `openai/` (five labs with MOCK / OpenAI / Azure modes) |
+| `labs/` | `gate-playground.ts`, `loopholes.ts`, `run-real.sh` (runs everything, saves logs, redacts secrets), `windows-test-fix.diff` (chapter 9), and `openai/` (five labs with MOCK / OpenAI / Azure modes) |
 | `diagrams/` | 45 PNG diagrams |
 | `research/sources.txt` | every URL used in chapter 6, with retrieval date |
 

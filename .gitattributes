@@ -1,0 +1,5 @@
+# Shell scripts must stay LF, or Git Bash fails with "\r: command not found"
+*.sh text eol=lf
+*.ts text eol=lf
+*.txt text
+*.md text

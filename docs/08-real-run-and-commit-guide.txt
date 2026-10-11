@@ -167,6 +167,9 @@ Cost of one full real run: roughly ten to twenty model requests, a few thousand 
 Options: INTERACTIVE=1 (lab 2 asks y/n), SKIP_TESTS=1 (skip the full suite),
 REDACT_ENDPOINT=1 (also hide the endpoint host in the saved logs), PORT=3457.
 
+If Git Bash answers "$'': command not found", the clone converted line endings. Fix once:
+  sed -i 's/$//' labs/run-real.sh
+
 It writes results/<date>_<time>_<mode>/ containing:
   00-environment.txt          mode, bun version, commit, endpoint, deployment, masked
                               tenant and client ids; the secret is never written

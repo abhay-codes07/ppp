@@ -38,6 +38,10 @@ Files:
 - `03-server.ts`            localhost server, per-request sessions, replay from history
 - `03-client.ts`            sends three requests to the server
 - `04-decision-provider.ts` the model picks transitions inside the workflow engine
+- `03-spoof.ts`             forged history unlocks deploy (run against 03-server.ts)
+- `azure.env.example`       template for ~/.petriflow-azure.env (copy OUTSIDE the repo)
+- `../run-real.sh`          runs every demo and saves the output under results/ (MOCK=1 to rehearse)
+- `../_redact.ts`           removes credential values from a results folder (run-real.sh calls it)
 
 Rehearse for free:
 - `MOCK=1 bun run labs/openai/01-file-agent.ts`

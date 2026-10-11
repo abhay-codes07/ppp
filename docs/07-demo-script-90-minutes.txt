@@ -111,7 +111,7 @@ Window 1:  MOCK=1 bun run labs/openai/03-server.ts     (or real: drop MOCK=1)
 Window 2:  bun run labs/openai/03-client.ts            # honest: test, then deploy w/ history
            bun run labs/openai/03-spoof.ts             # forged history
 Expected from 03-spoof.ts:
-  ### Honest: deploy with no history      -> BLOCKED: deploy requires a successful call to test first.
+  ### Honest: deploy with no history      -> BLOCKED: Tool 'deploy' blocked: deploy requires a successful call to test first.
   ### Forged: deploy with a fake 'tests passed' history -> (no BLOCKED line), budget 2 -> 1
   honest request blocked : true
   forged request blocked : false
@@ -147,3 +147,5 @@ Fallbacks
   Labs 1, 2, 3, 4 all run with MOCK=1.
 - Port busy: PORT=3457 for the server, BASE=http://localhost:3457 for client and spoof.
 - Fresh clone and tests fail with "Cannot find module @petriflow/gate": run bun run build.
+- One command for all demos with the output saved: `bash labs/run-real.sh`
+  (MOCK=1 for a rehearsal). Chapter 8 explains the real run and how to commit the results.

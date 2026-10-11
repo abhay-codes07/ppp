@@ -1,0 +1,276 @@
+CHAPTER 8. RUNNING IT FOR REAL: AZURE OPENAI, SAVING THE RESULTS, COMMITTING THEM
+=================================================================================
+
+Every command in this repository is a Git Bash command (bash syntax, forward slashes,
+`export`, `$?`, `2>&1 | tail`). They do not run unchanged in PowerShell or cmd. Windows
+paths appear as /c/... inside Git Bash. All commands run at the root of the petri-flow clone
+after a one-time `bun install && bun run build`.
+
+This chapter answers three questions: what "real" means for each demo, what is happening
+on the wire when a real model drives the gate, and how to save the real output and commit it
+to a company repository without leaking a credential. One script does the capture:
+
+  bash labs/run-real.sh            # real model, after exporting the AZURE_* variables
+  MOCK=1 bash labs/run-real.sh     # the same run with the scripted model (rehearsal)
+
+Verification status of this chapter: the script was run on the authoring machine in MOCK
+mode (12 of 12 steps ok) and in real mode with FAKE credentials (stops at the credential
+check with AADSTS900021, tenant id redacted from the saved log). No run with real
+credentials has been made by the author. Your first real run is the first one.
+
+--------------------------------------------------------------------------------
+8.1 Three layers of "real"
+--------------------------------------------------------------------------------
+Layer 1. The mathematics and the test suite. No model, no key, no network.
+  This includes workflows/agent-benchmark. "agent-benchmark" is the NAME of an example
+  workflow (16 places, 196 reachable states, 9 property tests in
+  workflows/agent-benchmark/agent-benchmark.test.ts). It is not a benchmark dataset and
+  it never calls a model: transitions typed "ai" carry a decorative config.model string and
+  an execute() that sleeps and returns canned context. The engine has no model client at
+  all (its only fetch is the generic httpNode helper in packages/engine/src/nodes.ts).
+  So `bun test workflows/agent-benchmark` and `petriflow analyse ... --strict` give the
+  same numbers on every machine. That is the point: the proof does not depend on a model.
+
+Layer 2. A real model drives the gate (labs 1 to 4). Real HTTPS calls to your Azure OpenAI
+  deployment; the model's choices and words are real; token counts are real and billed.
+  The tool EFFECTS are still simulated: lab 1 edits files only inside C:/tmp/petriflow-lab,
+  lab 2's deploy returns a JSON object, lab 3 returns {deployed: version}. Nothing is
+  deployed anywhere. The gate decisions are the real code path of @petriflow/gate.
+
+Layer 3. Not covered by the script: the upstream examples/ directory (Anthropic models,
+  needs ANTHROPIC_API_KEY) and the two-line Azure swap for them in chapter 13 part 4.6.
+
+--------------------------------------------------------------------------------
+8.2 Credentials in Git Bash, once per window
+--------------------------------------------------------------------------------
+You need five values from the admin: endpoint, deployment name, tenant id, client id,
+client secret. Keep them in a file OUTSIDE the repository:
+
+  cp labs/openai/azure.env.example ~/.petriflow-azure.env
+  nano ~/.petriflow-azure.env          # or notepad "$(cygpath -w ~/.petriflow-azure.env)"
+  chmod 600 ~/.petriflow-azure.env
+  set -a; source ~/.petriflow-azure.env; set +a
+
+Check what the shell has, without printing secrets:
+
+  env | grep -E '^AZURE_' | sed -E 's/=(....).*(....)$/=\1...\2/'
+
+Behind a corporate proxy also export HTTPS_PROXY (the example file has the line).
+If the labs/ folder is freshly copied into a clean clone, add the three packages once:
+
+  bun add @ai-sdk/openai@^3 @ai-sdk/azure@^3 @azure/identity
+
+The secret lives only in this window's environment. `unset AZURE_CLIENT_SECRET` or close
+the window when done. Never paste it into Copilot Chat, a ticket, or a commit.
+
+--------------------------------------------------------------------------------
+8.3 Step 0: the credential check, line by line
+--------------------------------------------------------------------------------
+  bun run labs/openai/00-check-key.ts
+
+What happens:
+  1. _model.ts picks the provider from the environment: MOCK=1 first, then
+     AZURE_OPENAI_ENDPOINT, otherwise OpenAI. You should see
+     "mode: REAL (Azure OpenAI, deployment <name>, service principal (Entra ID))".
+  2. It prints endpoint -> normalised base URL. A bare host becomes <host>/openai/v1.
+  3. Stage A, Entra ID. DefaultAzureCredential reads AZURE_TENANT_ID, AZURE_CLIENT_ID,
+     AZURE_CLIENT_SECRET (its EnvironmentCredential) and POSTs a client-credentials
+     request to https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token with scope
+     https://cognitiveservices.azure.com/.default. The answer is a JWT.
+     Line: "entra token: OK, <n> chars (<ms> ms)". This proves tenant, client id, secret.
+     It does NOT touch the OpenAI resource yet.
+  4. Stage B, one completion. @ai-sdk/azure v3 defaults to the Responses API, so the
+     request is POST <endpoint>/openai/v1/responses with header
+     "Authorization: Bearer <token>" and body model=<deployment name>. No api-version
+     query is added for a /openai/v1 base URL (checked in @ai-sdk/azure 3.0.135).
+     Lines: reply "OK" (or close), "tokens: input=<n> output=<n>" (small numbers), then
+     "Credentials work. You can run the other labs without MOCK=1."
+  5. Any failure prints the raw error plus a one-line explanation. The map of causes is
+     chapter 13 part 7.1 (AADSTS7000215 wrong secret, 700016 client id, 90002/900021
+     tenant, HTTP 401/403 role missing, 404 deployment name, ENOTFOUND proxy).
+
+--------------------------------------------------------------------------------
+8.4 What is happening in a real run, lab by lab
+--------------------------------------------------------------------------------
+The loop is the same for labs 1, 2 and 3:
+  a. compile(rules) builds one small Petri net per rule and returns the state counts.
+     Local, instant, identical in mock and real mode.
+  b. createPetriflowGate(nets) creates the GateManager; wrapTools() replaces each tool's
+     execute with: gate check, then the real execute, then the deferred firing on success.
+  c. The model receives three things: the lab's system text, session.systemPrompt()
+     (the composed nets, their available gated tools and current state), and the tool
+     schemas. It therefore KNOWS the rules before its first move.
+  d. generateText loops. Each step is one HTTPS request to the deployment carrying the
+     whole message history. The model answers with text or one or more tool calls. For
+     each tool call the SDK runs the wrapped execute:
+       classify -> approvals (lab 2) -> validate -> commit -> the real execute
+       -> on success, the deferred transition fires (the net now remembers it)
+     If the gate blocks, a ToolCallBlockedError is thrown; the SDK turns it into a
+     tool-error part and sends it back to the model as that tool's result in the next
+     request. The model reads the reason and chooses again.
+  e. The loop ends when the model answers in text, or stepCountIs(N) stops it.
+     printSteps() lists every call, and the final "tokens:" line is the sum of all steps.
+
+How a real run differs from the mock, and what stays fixed:
+  - Order and wording vary. A careful model may obey first time (no BLOCKED line at all).
+    A model may issue two tool calls in one step; the gate judges each separately.
+  - Step count and latency vary (one to five seconds per step is normal).
+  - The INVARIANTS never vary, because they are enforced by the gate, not by the model.
+    The capture script checks exactly these and ignores the model's wording.
+
+Lab 1, file-cleanup agent (require backup before delete; block rm)
+  Real flow: list -> (maybe a blocked delete) -> backup -> delete -> (maybe a blocked rm)
+  -> final text. Invariants: rm never executes, so "files left:" still contains
+  old-backup.tar.gz; delete executes only after SOME backup returned ok:true (any backup
+  unlocks any delete, loophole 1), so a .bak file exists whenever temp.log is gone.
+  "blocked calls: 0" is a valid real result
+  (the model read the rules and never tried). Scratch folder: C:/tmp/petriflow-lab only.
+
+Lab 2, deployment agent (lint -> test -> deploy, human approval, limit 2 per session)
+  Real flow: the model works through the pipeline; before each deploy the gate asks the
+  confirm() callback. With AUTO_APPROVE=1 (the script default) it is auto-approved and
+  logged "[human] ... -> auto-approved"; with INTERACTIVE=1 you type y or n. The question is
+  asked INSIDE the tool execution, between two model requests, so Azure is not waiting on
+  anything and there is no timeout risk while you think. Invariants: at most two entries in
+  "deployments that actually happened"; a deploy never precedes a passed test; answering n
+  blocks that deploy; FAIL_TESTS=1 keeps deploy locked for the whole run.
+
+Lab 3, server + client + forged history (require test before deploy; limit 2)
+  The server compiles once and keeps NO state between requests. Every POST /chat builds a
+  fresh session from the history the client sends (replay), then calls the real model once
+  per step. Client request 1: tests. Request 2 sends that history back: replay sees the
+  successful test, deploy is allowed. Request 3 sends no history: with the scripted model
+  the deploy is blocked ("Tool 'deploy' blocked: deploy requires a successful call to test
+  first."). With a real model, request 3 may instead show the model calling test first and
+  then deploy, both allowed. Both outcomes demonstrate the same rule; read
+  13-lab3-server.log to see which one happened ("[gate] BLOCKED deploy" or "[gate] allow
+  test" then "[gate] allow deploy"). 03-spoof.ts then sends a FABRICATED history in which a
+  test tool result says passed:true. Invariant of the loophole: "forged request blocked :
+  false". The model never ran a test; replay believed the client. This is the design
+  consequence of a stateless gate, not a model behaviour.
+
+Lab 4, the model as the engine's decision provider (workflows/simple-agent)
+  Here the model is inside the ENGINE, not the gate. At each choice point the engine lists
+  the enabled transitions; the lab forces one tool call pickTransition whose schema is a
+  zod enum of exactly those names, so the model cannot invent a transition. Invariant:
+  final status "completed"; "[llm] chose ..." lines show the reasoning. The iteration
+  budget place (2 tokens) bounds the loop whatever the model prefers.
+
+Cost of one full real run: roughly ten to twenty model requests, a few thousand tokens.
+
+--------------------------------------------------------------------------------
+8.5 One command captures everything: labs/run-real.sh
+--------------------------------------------------------------------------------
+  bash labs/run-real.sh                # real
+  MOCK=1 bash labs/run-real.sh         # rehearsal first, always
+
+Options: INTERACTIVE=1 (lab 2 asks y/n), SKIP_TESTS=1 (skip the full suite),
+REDACT_ENDPOINT=1 (also hide the endpoint host in the saved logs), PORT=3457.
+
+It writes results/<date>_<time>_<mode>/ containing:
+  00-environment.txt          mode, bun version, commit, endpoint, deployment, masked
+                              tenant and client ids; the secret is never written
+  01..06-*.log                Part A, no model: three analyses, the 9 benchmark property
+                              tests, the gate playground, the five-loophole script
+  10-check-credentials.log    real mode only; the run stops here if it fails
+  11..16-*.log                Part B: labs 1, 2, 3 (server, client, spoof), 4
+  20-full-test-suite.log      Part C unless SKIP_TESTS=1
+  SUMMARY.txt                 one verdict per step
+
+Verdicts: "ok" means exit code 0 and the invariant line was found. "exit=N" means the
+command failed. "missing: <pattern>" means it ran but the line that makes the demo count is
+absent; open that log. On Windows, 20-full-test-suite shows exit=1 with the 17 known
+Windows-only failures (chapter 11); on Linux or macOS it is ok.
+
+Before the script ends it runs labs/_redact.ts over the folder: every occurrence of the
+VALUES of AZURE_CLIENT_SECRET, AZURE_OPENAI_API_KEY, OPENAI_API_KEY, AZURE_CLIENT_ID and
+AZURE_TENANT_ID is replaced by <REDACTED:NAME>. This matters: Entra error messages echo the
+tenant id in clear text (seen in the fake-credential run; the saved log shows the
+placeholder). Token counts, model text and gate lines are untouched.
+
+Expected SUMMARY in MOCK mode (observed 11 October 2026):
+  01-analyse-coffee              ok
+  02-analyse-order-checkout      ok
+  03-analyse-agent-benchmark     ok
+  04-benchmark-property-tests    ok
+  05-gate-playground             ok
+  06-loopholes                   ok
+  11-lab1-file-agent             ok
+  12-lab2-deploy-agent           ok
+  12-lab2-deploy-limit           ok (two or fewer deployments)
+  14-lab3-client                 ok
+  15-lab3-spoof                  ok
+  16-lab4-decision-provider      ok
+  ok: 12   not ok: 0
+Real mode adds 10-check-credentials (must be ok, or nothing else runs) and the same
+twelve lines; 11 to 16 then contain the real model's calls and token counts.
+
+--------------------------------------------------------------------------------
+8.6 Reading the real results: a checklist and a results table
+--------------------------------------------------------------------------------
+Open each log and confirm:
+  10  "entra token: OK" and "Credentials work"; note the input/output token numbers
+  11  "files left:" has old-backup.tar.gz; count the BLOCKED lines (0, 1 or 2 are all fine)
+  12  "deployments that actually happened:" has two or fewer entries; find the
+      "[human]" lines (auto or typed) and the limit block if the model tried a third deploy
+  13  server log: per request, "state after replay" then "[gate] allow" / "[gate] BLOCKED"
+  14  request 2 allowed with history; request 3 either blocked or test-then-deploy
+  15  "forged request blocked : false" and "Result: the forgery WORKED."
+  16  "[llm] chose ..." lines, "final: ... status completed"
+
+Fill this table for the review (one row per lab, from the logs):
+  lab | deployment | steps | tool calls | blocked by gate | approvals | tokens in/out | invariant held
+A reasonable sentence for the slide: "Real model, real gate, same invariants as the
+scripted rehearsal; the model's path differed in <n> places, the gate's decisions did not."
+
+--------------------------------------------------------------------------------
+8.7 Committing labs and results to the company repository (Git Bash)
+--------------------------------------------------------------------------------
+The clone's origin is the upstream project. Point origin at the company project and keep
+upstream for pulling:
+
+  git remote rename origin upstream
+  git remote add origin <company-repo-url>
+  git checkout -b azure-openai-labs
+
+What to commit: labs/, results/<stamp>_real/, package.json, bun.lock (the three added
+dependencies). What never to commit: ~/.petriflow-azure.env (it is outside the repo),
+anything under C:/tmp, the PDFs. Optional safety line for .gitignore:
+
+  printf '%s\n' '*.env' '!*.env.example' >> .gitignore
+
+Stage, then scan the staged diff three ways; every scan must print nothing:
+
+  git add labs results package.json bun.lock .gitignore
+  git diff --cached --name-only
+  git diff --cached | grep -nE 'AZURE_CLIENT_SECRET=.|sk-[A-Za-z0-9]{20}|eyJ[A-Za-z0-9_-]{30,}'
+  git diff --cached | grep -nF -- "$AZURE_CLIENT_SECRET"
+  git diff --cached | grep -nE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+
+(eyJ is how every JWT begins; the last line catches any GUID that escaped redaction. A
+"Trace ID" or "Correlation ID" GUID inside an Entra error text is harmless; a tenant or
+client id is not. If such a line prints, unstage that file, fix it, stage again.) Then:
+
+  git commit -m "Add PetriFlow LLM labs (Azure OpenAI via service principal) and real-run results
+
+Labs 1-4 and the forged-history demo run against the company deployment on $(date +%F).
+Results folder is redacted by labs/_redact.ts; see results/*/SUMMARY.txt.
+Upstream: https://github.com/joshuaisaact/petri-flow (MIT)."
+  git push -u origin azure-openai-labs
+
+If the platform asks for a login, Git Credential Manager opens a browser window; a
+personal access token works as the password if prompted in the terminal.
+
+Do not push results/<stamp>_real/ to the public ppp repository: 00-environment.txt holds
+the endpoint host and the deployment name, which belong to the company.
+
+--------------------------------------------------------------------------------
+8.8 Five-minute dry run before the meeting
+--------------------------------------------------------------------------------
+  set -a; source ~/.petriflow-azure.env; set +a
+  bun run labs/openai/00-check-key.ts                     # 10 s
+  MOCK=1 SKIP_TESTS=1 bash labs/run-real.sh               # 1 min, no network
+  SKIP_TESTS=1 bash labs/run-real.sh                      # 2-4 min, real
+  cat results/*_real/SUMMARY.txt
+Keep the real results folder open during the review: when a demo is asked for live and the
+network is slow, the saved log is the fallback.

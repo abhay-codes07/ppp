@@ -1,0 +1,147 @@
+diff --git a/comparisons/openclaw-safety/src/run.ts b/comparisons/openclaw-safety/src/run.ts
+index 1c5c4ff..aff4425 100644
+--- a/comparisons/openclaw-safety/src/run.ts
++++ b/comparisons/openclaw-safety/src/run.ts
+@@ -5,7 +5,7 @@ import {
+ } from "@petriflow/engine";
+ import type { Marking, ExecuteFn } from "@petriflow/engine";
+ import { generateText, tool } from "ai";
+-import { anthropic } from "@ai-sdk/anthropic";
++import { realModel } from "../../../labs/openai/_model";
+ import { z } from "zod";
+ import * as readline from "node:readline";
+ 
+@@ -65,7 +65,7 @@ executors.set("execShell", async (ctx) => {
+ executors.set("generateResponse", async (ctx) => {
+   console.log("  [generateResponse] Calling Claude to synthesize response...");
+   const result = await generateText({
+-    model: anthropic("claude-sonnet-4-5-20250929"),
++    model: realModel(),
+     system: "You are synthesizing tool results into a final answer. Be concise.",
+     prompt: `Synthesize these tool results into a brief response:
+ - Search: ${ctx.searchResult ?? "no results"}
+@@ -86,7 +86,7 @@ async function llmChoose(
+   const transitionNames = enabled.map((t) => t.name);
+ 
+   const result = await generateText({
+-    model: anthropic("claude-sonnet-4-5-20250929"),
++    model: realModel(),
+     system: `You are a workflow controller for the "tool-approval" scenario. You control an AI agent that has received a task requiring search, file-read, and shell tools. Pick the best transition to fire next.`,
+     prompt: `Current marking: ${nonZeroMarking(marking)}
+ Context: ${JSON.stringify(ctx)}
+diff --git a/examples/01-file-management/agent.ts b/examples/01-file-management/agent.ts
+index 800d36c..18099d7 100644
+--- a/examples/01-file-management/agent.ts
++++ b/examples/01-file-management/agent.ts
+@@ -1,5 +1,5 @@
+ import { generateText, tool, stepCountIs } from "ai";
+-import { anthropic } from "@ai-sdk/anthropic";
++import { realModel } from "../../labs/openai/_model";
+ import { z } from "zod";
+ import { loadRules } from "@petriflow/rules";
+ import { createPetriflowGate } from "@petriflow/vercel-ai";
+@@ -7,7 +7,7 @@ import { files } from "./tools";
+ 
+ // Load rules from file
+ const { nets, verification } = await loadRules(
+-  new URL("./safety.rules", import.meta.url).pathname,
++  `${import.meta.dir}/safety.rules`,
+ );
+ console.log("Loaded rules:", verification);
+ 
+@@ -54,7 +54,7 @@ const session = gate.wrapTools({
+ });
+ 
+ const result = await generateText({
+-  model: anthropic("claude-sonnet-4-5-20250929"),
++  model: realModel(),
+   system: `You are a file management agent that helps clean up directories.\n\n${session.systemPrompt()}`,
+   tools: session.tools,
+   stopWhen: stepCountIs(10),
+diff --git a/examples/02-deployment/agent.ts b/examples/02-deployment/agent.ts
+index 4a50083..9209c42 100644
+--- a/examples/02-deployment/agent.ts
++++ b/examples/02-deployment/agent.ts
+@@ -1,5 +1,5 @@
+ import { generateText, tool, stepCountIs } from "ai";
+-import { anthropic } from "@ai-sdk/anthropic";
++import { realModel } from "../../labs/openai/_model";
+ import { z } from "zod";
+ import { loadRules } from "@petriflow/rules";
+ import { createPetriflowGate } from "@petriflow/vercel-ai";
+@@ -7,7 +7,7 @@ import { pipeline } from "./tools";
+ 
+ // Load rules from file
+ const { nets, verification } = await loadRules(
+-  new URL("./pipeline.rules", import.meta.url).pathname,
++  `${import.meta.dir}/pipeline.rules`,
+ );
+ console.log("Loaded rules:", verification);
+ 
+@@ -65,7 +65,7 @@ const session = gate.wrapTools({
+ });
+ 
+ const result = await generateText({
+-  model: anthropic("claude-sonnet-4-5-20250929"),
++  model: realModel(),
+   system: `You are a deployment agent that manages CI/CD pipelines.\n\n${session.systemPrompt()}`,
+   tools: session.tools,
+   stopWhen: stepCountIs(15),
+diff --git a/examples/03-discord-bot/agent.ts b/examples/03-discord-bot/agent.ts
+index e537a29..787c2e4 100644
+--- a/examples/03-discord-bot/agent.ts
++++ b/examples/03-discord-bot/agent.ts
+@@ -1,5 +1,5 @@
+ import { generateText, tool, stepCountIs } from "ai";
+-import { anthropic } from "@ai-sdk/anthropic";
++import { realModel } from "../../labs/openai/_model";
+ import { z } from "zod";
+ import { loadRules } from "@petriflow/rules";
+ import { createPetriflowGate } from "@petriflow/vercel-ai";
+@@ -7,7 +7,7 @@ import { discord } from "./tools";
+ 
+ // Load rules from file
+ const { nets, verification } = await loadRules(
+-  new URL("./messaging.rules", import.meta.url).pathname,
++  `${import.meta.dir}/messaging.rules`,
+ );
+ console.log("Loaded rules:", verification);
+ 
+@@ -64,7 +64,7 @@ const session = gate.wrapTools({
+ });
+ 
+ const result = await generateText({
+-  model: anthropic("claude-sonnet-4-5-20250929"),
++  model: realModel(),
+   system: `You are a Discord bot agent that manages channel communications.\n\n${session.systemPrompt()}`,
+   tools: session.tools,
+   stopWhen: stepCountIs(15),
+diff --git a/examples/04-devops-assistant/agent.ts b/examples/04-devops-assistant/agent.ts
+index 9f472f9..b845479 100644
+--- a/examples/04-devops-assistant/agent.ts
++++ b/examples/04-devops-assistant/agent.ts
+@@ -1,5 +1,5 @@
+ import { generateText, tool, stepCountIs } from "ai";
+-import { anthropic } from "@ai-sdk/anthropic";
++import { realModel } from "../../labs/openai/_model";
+ import { z } from "zod";
+ import { createInterface } from "readline";
+ import { loadRules } from "@petriflow/rules";
+@@ -19,7 +19,7 @@ async function askApproval(title: string, message: string): Promise<boolean> {
+ 
+ // Load rules from file
+ const { nets, verification } = await loadRules(
+-  new URL("./assistant.rules", import.meta.url).pathname,
++  `${import.meta.dir}/assistant.rules`,
+ );
+ console.log("Loaded rules:", verification);
+ 
+@@ -138,7 +138,7 @@ const session = gate.wrapTools({
+ });
+ 
+ const result = await generateText({
+-  model: anthropic("claude-sonnet-4-5-20250929"),
++  model: realModel(),
+   system: `You are a DevOps assistant that manages deployments, communications, and file cleanup.\n\n${session.systemPrompt()}`,
+   tools: session.tools,
+   stopWhen: stepCountIs(20),

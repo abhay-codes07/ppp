@@ -33,12 +33,13 @@ executing the command shown.
 | `docs/06-self-evolving-agents-research.txt` | 2025-2026 literature, where a static gate sits, research agenda R1-R8 |
 | `docs/07-demo-script-90-minutes.txt` | agenda, nine demos, commands, expected output |
 | `docs/08-real-run-and-commit-guide.txt` | real Azure run step by step, `labs/run-real.sh` to save the output, committing results to a company repo without leaking a credential |
-| `docs/09-test-suite-walkthrough.md` | the whole test suite on a fresh clone: commands, every test file, the source lines each exercises, the Windows failures and a reversible patch, what is not tested (also `pdf/PetriFlow_Test_Suite_Walkthrough.pdf`) |
+| `docs/09-test-suite-walkthrough.md` (+ `.txt`) | the whole test suite on a fresh clone: commands, every test file, the source lines each exercises, the Windows failures and a reversible patch, what is not tested (also `pdf/PetriFlow_Test_Suite_Walkthrough.pdf`) |
+| `docs/14-run-everything-workflows-examples-azure.txt` | run all six workflows, the OpenClaw ops rules and the four example agents on Azure OpenAI with `labs/run-examples.sh`; what each run shows; Git Bash versus PowerShell |
 | `docs/10..13-full-guide-*.txt` | the four long guides (concepts, tests and workflows, LLM labs, Azure setup) as text |
 | `pdf/` | the same guides as PDFs, plus `PetriFlow_Review_Notes.pdf` (chapters 1-7 with diagrams) |
-| `ppt/` | the deck, slide PNGs, slide text with speaker notes |
-| `labs/` | `gate-playground.ts`, `loopholes.ts`, `run-real.sh` (runs everything, saves logs, redacts secrets), `windows-test-fix.diff` (chapter 9), and `openai/` (five labs with MOCK / OpenAI / Azure modes) |
-| `diagrams/` | 45 PNG diagrams |
+| `ppt/` | the deck, slide PNGs, slide text with speaker notes, `slides-to-trim.txt` |
+| `labs/` | `gate-playground.ts`, `loopholes.ts`, `run-real.sh` (runs everything, saves logs, redacts secrets), `windows-test-fix.diff` (chapter 9), `azure-examples.diff` + `run-examples.sh` + `ops-rules-demo.ts` (chapter 14), and `openai/` (five labs with MOCK / OpenAI / Azure modes) |
+| `diagrams/` | 47 PNG diagrams; `46-architecture-flow.png` and `47-one-gated-tool-call.png` are the two large ones for slides |
 | `research/sources.txt` | every URL used in chapter 6, with retrieval date |
 
 ## Run the demos (inside a petri-flow clone)
@@ -64,7 +65,13 @@ Real model: export `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_TE
 `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` (service principal) and drop `MOCK=1`; or export
 `OPENAI_API_KEY`. Details and troubleshooting: `docs/13-full-guide-azure-service-principal.txt`.
 
-## The architecture in six diagrams
+## The architecture in two large diagrams (for slides)
+
+![architecture flow](diagrams/46-architecture-flow.png)
+
+![one gated tool call](diagrams/47-one-gated-tool-call.png)
+
+## The architecture in six smaller diagrams
 
 Where the rule lives:
 

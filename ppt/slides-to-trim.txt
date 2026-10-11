@@ -1,0 +1,40 @@
+WHICH SLIDES TO LEAVE OUT FOR NOW
+=================================
+
+The deck has 45 slides. For a first 90-minute review that is mostly architecture, live
+runs and loopholes, 30 slides are enough. Keep the diagrams; drop the slides below and
+say their one sentence out loud instead. Slide numbers match ppt/slides/SlideNN.PNG and
+ppt/PetriFlow_Review_slides.txt.
+
+DROP NOW (12 slides)
+  3, 9, 17, 25, 32, 37   section dividers ("PART n"). Six slides that only carry a title.
+                         Announce the part verbally; keep slide 2 (agenda) as the map.
+  16  The engine tick    Detail of Scheduler.tick(). Only needed if asked how timeouts or
+                         persistence work; chapter 9 section 5.6-5.7 has it.
+  31  Running the website's example on a company laptop
+                         Superseded by chapters 8 and 14 and by the live run itself.
+  38  What 'self-evolving agent' means (two surveys)
+  39  Landmark systems and what evolves
+  41  The neighbourhood: formal guardrails for LLM agents
+                         Literature background. Keep 40 (safety findings), 42 (where
+                         PetriFlow stands) and 43 (research agenda); those are the point.
+  45  Appendix: run everything yourself
+                         Replaced by the repository README and chapter 14.
+
+KEEP BUT SHORTEN (say in one breath, do not read)
+  15  Five adapters, one core      one sentence: same GateManager, five hosts.
+  36  What is NOT a loophole       fairness slide; one sentence, then move on.
+  29  The scope of the proof       show the diagram, one sentence.
+
+ADD (new material since the deck was built)
+  After slide 12 (one tool call): diagrams/46-architecture-flow.png and
+  diagrams/47-one-gated-tool-call.png, the two new larger diagrams.
+  After slide 20 (break the proof): one slide with the fresh-clone test numbers from
+  chapter 9: 639 tests in 39 files; Windows unpatched 588 pass / 9 fail / 4 errors; with
+  the ten-line path patch 639 pass. Say that the failures are path handling, not logic.
+  Before slide 44 (conclusions): one slide with the real-run results table from chapter 8
+  section 8.6, filled in from your results/ folder.
+
+RESULTING ORDER (30 + 3 new)
+  1 2 4 5 6 7 8 | 10 11 12 [46] [47] 13 14 15 | 18 19 20 [tests] 21 22 23 24 | 26 27 28 29 30 |
+  33 34 35 36 | 40 42 43 [real-run] 44

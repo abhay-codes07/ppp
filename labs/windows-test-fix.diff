@@ -11,19 +11,6 @@ index 4e601ef..a6b34f5 100644
  );
  
  function mockTool(fn?: (...args: any[]) => any) {
-diff --git a/examples/01-file-management/agent.ts b/examples/01-file-management/agent.ts
-index 800d36c..28419f1 100644
---- a/examples/01-file-management/agent.ts
-+++ b/examples/01-file-management/agent.ts
-@@ -7,7 +7,7 @@ import { files } from "./tools";
- 
- // Load rules from file
- const { nets, verification } = await loadRules(
--  new URL("./safety.rules", import.meta.url).pathname,
-+  `${import.meta.dir}/safety.rules`,
- );
- console.log("Loaded rules:", verification);
- 
 diff --git a/examples/02-deployment/agent.test.ts b/examples/02-deployment/agent.test.ts
 index ff0e855..a4aab73 100644
 --- a/examples/02-deployment/agent.test.ts
@@ -37,19 +24,6 @@ index ff0e855..a4aab73 100644
  );
  
  function mockTool(fn?: (...args: any[]) => any) {
-diff --git a/examples/02-deployment/agent.ts b/examples/02-deployment/agent.ts
-index 4a50083..7abf7a7 100644
---- a/examples/02-deployment/agent.ts
-+++ b/examples/02-deployment/agent.ts
-@@ -7,7 +7,7 @@ import { pipeline } from "./tools";
- 
- // Load rules from file
- const { nets, verification } = await loadRules(
--  new URL("./pipeline.rules", import.meta.url).pathname,
-+  `${import.meta.dir}/pipeline.rules`,
- );
- console.log("Loaded rules:", verification);
- 
 diff --git a/examples/03-discord-bot/agent.test.ts b/examples/03-discord-bot/agent.test.ts
 index 8f03764..537c0ec 100644
 --- a/examples/03-discord-bot/agent.test.ts
@@ -63,19 +37,6 @@ index 8f03764..537c0ec 100644
  );
  
  function mockTool(fn?: (...args: any[]) => any) {
-diff --git a/examples/03-discord-bot/agent.ts b/examples/03-discord-bot/agent.ts
-index e537a29..27748e8 100644
---- a/examples/03-discord-bot/agent.ts
-+++ b/examples/03-discord-bot/agent.ts
-@@ -7,7 +7,7 @@ import { discord } from "./tools";
- 
- // Load rules from file
- const { nets, verification } = await loadRules(
--  new URL("./messaging.rules", import.meta.url).pathname,
-+  `${import.meta.dir}/messaging.rules`,
- );
- console.log("Loaded rules:", verification);
- 
 diff --git a/examples/04-devops-assistant/agent.test.ts b/examples/04-devops-assistant/agent.test.ts
 index e6ce867..b4a1e58 100644
 --- a/examples/04-devops-assistant/agent.test.ts
@@ -89,19 +50,6 @@ index e6ce867..b4a1e58 100644
  );
  
  function mockTool(fn?: (...args: any[]) => any) {
-diff --git a/examples/04-devops-assistant/agent.ts b/examples/04-devops-assistant/agent.ts
-index 9f472f9..d53dbd5 100644
---- a/examples/04-devops-assistant/agent.ts
-+++ b/examples/04-devops-assistant/agent.ts
-@@ -19,7 +19,7 @@ async function askApproval(title: string, message: string): Promise<boolean> {
- 
- // Load rules from file
- const { nets, verification } = await loadRules(
--  new URL("./assistant.rules", import.meta.url).pathname,
-+  `${import.meta.dir}/assistant.rules`,
- );
- console.log("Loaded rules:", verification);
- 
 diff --git a/packages/pi-assistant/src/nets/cleanup.ts b/packages/pi-assistant/src/nets/cleanup.ts
 index 9a48f20..92b7a6b 100644
 --- a/packages/pi-assistant/src/nets/cleanup.ts

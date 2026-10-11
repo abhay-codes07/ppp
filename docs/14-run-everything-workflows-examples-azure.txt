@@ -1,0 +1,342 @@
+CHAPTER 14. RUN EVERYTHING: THE SIX WORKFLOWS, THE OPENCLAW OPS RULES, AND THE FOUR
+EXAMPLE AGENTS ON AZURE OPENAI, WITH WHAT TO SAY WHILE THEY RUN
+===================================================================================
+
+Everything below is Git Bash, from the root of a petri-flow clone. Section 9 lists what
+breaks in PowerShell and the equivalent command there. Section 10 is the talk track that
+goes with the two large diagrams (diagrams/46-architecture-flow.png and
+diagrams/47-one-gated-tool-call.png).
+
+Verification status. Parts A and B (no model) were run on 11 October 2026 on a fresh clone
+of commit dcd6196 on Windows 11, Bun 1.3.14: 12 of 12 steps ok, outputs quoted below are
+from that run. Part C (the example agents on Azure) was run with FAKE credentials: each
+agent loads its rules, builds the gate, reaches Microsoft Entra and stops with AADSTS900021.
+That proves the wiring up to the token request. No run with real credentials has been
+made by the author; your first real run is the first.
+
+Contents
+  1. Setup from scratch (eight commands)
+  2. The two patches and how to undo them ("keep the clone as it was")
+  3. One command runs everything: labs/run-examples.sh
+  4. Part A: the six workflows, what prints, what is happening
+  5. Part B: the OpenClaw ops rules without OpenClaw, playground, loopholes, example tests
+  6. Part C: the example agents with the real model (01, 02, 03, 04)
+  7. What each example needs, and what cannot run on a laptop
+  8. Reading the results folder
+  9. Git Bash versus PowerShell
+ 10. The talk track for the two architecture diagrams
+ 11. What to commit afterwards
+
+--------------------------------------------------------------------------------
+1. Setup from scratch (eight commands)
+--------------------------------------------------------------------------------
+  git clone https://github.com/joshuaisaact/petri-flow && cd petri-flow
+  bun install && bun run build                 # observed: 435 packages, ~41 s; build ~31 s
+  mkdir -p /c/tmp                              # the Claude Code hook tests and example 01 use /tmp
+  git clone https://github.com/abhay-codes07/ppp ../ppp && cp -r ../ppp/labs .
+  bun add @ai-sdk/openai@^3 @ai-sdk/azure@^3 @azure/identity@^4.13.3
+  git apply labs/azure-examples.diff           # examples 01-04 and the comparison runner: Azure instead of Anthropic
+  git apply labs/windows-test-fix.diff         # Windows only: 6 files, makes `bun test` and example 02 green
+  cp labs/openai/azure.env.example ~/.petriflow-azure.env && chmod 600 ~/.petriflow-azure.env
+  # fill in the five values, then in every new window:
+  set -a; source ~/.petriflow-azure.env; set +a
+
+If you already edited the example files yourself (you said you did), skip the first
+`git apply` and compare instead: `git diff examples` should show, per file, an import of
+an Azure-capable model and `model: realModel()` or your equivalent. The script in section
+3 checks for the string `labs/openai/_model` in example 01; if your edit is different,
+run Part C by hand with the commands in section 6.
+
+--------------------------------------------------------------------------------
+2. The two patches and how to undo them
+--------------------------------------------------------------------------------
+labs/azure-examples.diff (5 files, 15 changed lines, generated with git diff):
+  examples/01-file-management/agent.ts, 02-deployment, 03-discord-bot, 04-devops-assistant:
+    -import { anthropic } from "@ai-sdk/anthropic";
+    +import { realModel } from "../../labs/openai/_model";
+    -  new URL("./safety.rules", import.meta.url).pathname,      (Windows: "/C:/..." cannot be opened)
+    +  `${import.meta.dir}/safety.rules`,
+    -  model: anthropic("claude-sonnet-4-5-20250929"),
+    +  model: realModel(),
+  comparisons/openclaw-safety/src/run.ts: the same import and two model lines.
+
+realModel() is in labs/openai/_model.ts (chapter 13): with AZURE_OPENAI_ENDPOINT set it
+builds createAzure({ baseURL, tokenProvider }) from the service principal; nothing else in
+the examples changes. The tools, rules and prompts are upstream's.
+
+labs/windows-test-fix.diff (6 files): import.meta.dir in the four example TEST files and
+posix.normalize in packages/pi-extension/src/nets/nuke.ts and
+packages/pi-assistant/src/nets/cleanup.ts. Both patches apply together; verified: with
+both applied `bun test` prints 639 pass, 0 fail.
+
+Undo everything and keep the clone as it was:
+  git checkout -- examples comparisons packages package.json bun.lock
+  rm -rf labs results /c/tmp/project examples/02-deployment/.deploy-state.json
+  git status --short            # empty
+
+--------------------------------------------------------------------------------
+3. One command runs everything: labs/run-examples.sh
+--------------------------------------------------------------------------------
+  bash labs/run-examples.sh                  # A + B need nothing; C needs the AZURE_* variables
+  SKIP_REAL=1 bash labs/run-examples.sh      # A + B only
+  INTERACTIVE=1 bash labs/run-examples.sh    # also example 04 (asks y/n)
+
+It saves one log per step under results/<date>_examples/ plus SUMMARY.txt, checks one
+invariant line per step, and runs labs/_redact.ts at the end so credential values never
+reach the logs. Observed SUMMARY with SKIP_REAL=1 (fresh clone, 11 October 2026):
+
+  A1-workflow-coffee                 ok
+  A2-workflow-order-checkout         ok
+  A3-workflow-contract-approval      ok
+  A4-workflow-simple-agent           ok
+  A5-workflow-agent-benchmark        ok
+  A6-workflow-github-lookup          ok
+  A7-analyse-all-strict              ok
+  B1-openclaw-ops-verify             ok
+  B2-openclaw-ops-gate-demo          ok
+  B3-gate-playground                 ok
+  B4-loopholes                       ok
+  B5-example-tests                   ok
+  C-examples                         skipped: SKIP_REAL=1
+  ok: 12   not ok: 0   skipped: 1
+
+With fake credentials the same run adds "C0-check-credentials  exit=1; missing:
+Credentials work" and "Credentials check failed; Part C not run." With real credentials
+C0 passes and C1, C2 run; C3 and C4 are skipped unless their variables are set (section 7).
+
+--------------------------------------------------------------------------------
+4. Part A: the six workflows, what prints, what is happening
+--------------------------------------------------------------------------------
+Each `bun workflows/<name>/index.ts` creates one instance in an in-memory SQLite database
+and calls scheduler.tick() in a loop until nothing fires. No model is involved anywhere in
+Part A: transitions typed "ai" or "http" carry an execute() that sleeps and returns canned
+context. What you see is the engine: canFire AND guard decides what is enabled, the first
+enabled transition fires, execute() patches the context, the row is saved, onFire prints.
+
+  Command                                     Fires (in order)                              States / notes
+  bun workflows/coffee/index.ts               heatWater, grindBeans, pourOver               5 reachable; 6 s of sleeps; pourOver needs 3 tokens + guard waterTemp >= 90
+  bun workflows/order-checkout/index.ts       reserve_stock, process_payment                4 reachable; invariant inventory+reserved+shipped holds; inventory 3 -> 2
+  bun workflows/contract-approval/index.ts    submit, approveFinance, approveLegal, execute 11 reachable, 4 terminal; finance and legal are concurrent (fork/join)
+  bun workflows/simple-agent/index.ts         plan, dispatchTool, completeTool, generate    15 reachable, 3 terminal; at resultsReady both generate and iterate are enabled and the engine takes the first (generate)
+  bun workflows/agent-benchmark/index.ts      plan, distribute, dispatchSearch, completeSearch, dispatchDB, completeDB, dispatchCode, requestApproval, approveCode, executeCode, joinResults, generate   196 reachable, 4 terminal
+  bun workflows/github-lookup/index.ts        fetchUser, fetchRepos                         3 reachable; the ONLY live network call (api.github.com/users/octocat); needs internet
+
+Expected tail of every run: "[<id>] completed" (coffee, order, simple-agent and benchmark
+print a check mark before it) and a "Final state" block with status "completed".
+
+A7 runs `petriflow analyse --strict` on all six and must end with exit 0. Lines to point at:
+  Workflow: order-checkout      1·inventory + 1·reserved + 1·shipped = const → holds
+  Workflow: contract-approval   Reachable states: 11, Terminal states: 4 (all valid)
+  Workflow: agent-benchmark     Reachable states: 196, Terminal states: 4 (all valid)
+
+What to say: the engine is a scheduler over a Petri net; the mathematics it uses at
+runtime is canFire and fire; analyse is a separate, offline enumeration of the same net
+(chapter 9, sections 4 to 6). The "ai" label on a transition is a string; the engine
+never calls a model. Lab 4 (chapter 7, demo 9) is where a model enters the engine, as a
+decision provider choosing among already-enabled transitions.
+
+--------------------------------------------------------------------------------
+5. Part B: the OpenClaw ops rules without OpenClaw, playground, loopholes, tests
+--------------------------------------------------------------------------------
+examples/05-openclaw-ops is a 56-rule policy for the OpenClaw plugin (26 require, 16
+limit, 14 block) plus 83 `map` lines that split one `exec` tool into virtual tools by
+regex. The plugin itself needs OpenClaw installed, so the repo cannot run it end to end;
+two things can run:
+
+B1  bun examples/05-openclaw-ops/verify.ts      (upstream's own script)
+    Prints "Rules: 56 nets from ops-assistant.rules", one "<net>: N reachable states" line
+    per rule (block nets 2, sequence nets 3, limit nets N+2, largest limit-exec-50: 52),
+    then the hand-built deployment-pipeline net: 5 reachable states, deadlock-free,
+    token conservation holds, "Total: 57 nets, 62 unique gated tools".
+
+B2  bun run labs/ops-rules-demo.ts               (added for the review)
+    Loads the same rules into a GateManager with hasUI:false, which is exactly how the
+    OpenClaw adapter calls it, and pushes shell commands through. Observed:
+      exec "rm -rf build/"               -> BLOCK  rm-force is blocked and cannot be called.
+      exec "sudo apt install x"          -> BLOCK  sudo is blocked and cannot be called.
+      exec "git commit -m 'x'"           -> BLOCK  git-commit requires a successful call to git-diff first.
+      exec "git diff"                    -> allow
+      exec "git commit -m 'x'"           -> BLOCK  git-commit requires a successful call to git-add first.
+      exec "git add ."                   -> allow
+      exec "git commit -m 'x'"           -> allow
+      exec "git push origin main"        -> allow
+      exec "git push origin main"        -> BLOCK  git-push requires a successful call to git-commit first.
+      exec "rm notes.txt"                -> BLOCK  rm-file requires a successful call to cp-file first.
+      exec "cp notes.txt notes.bak"      -> allow
+      exec "rm notes.txt"                -> allow
+      exec "npm publish"                 -> BLOCK  npm-publish requires a successful call to npm-build first.
+      message {"to":"team","text":"hi"}  -> BLOCK  message requires human approval.
+      exec "rm -r -f build/"             -> BLOCK  rm-file requires ... cp-file first.   (not rm-force: the regex wants the literal -rf)
+      exec "/bin/rm -rf build/"          -> BLOCK  rm-force is blocked and cannot be called.
+      exec "find build -delete"          -> allow                                        (no map line matches)
+    What to say: two sequence rules on the same tool compose as AND (diff AND add before
+    commit); every approval rule is a hard block in a headless host; the regex table is
+    the policy's real boundary (chapter 5, loophole 2).
+
+B3  bun run labs/gate-playground.ts   B4  bun run labs/loopholes.ts   (chapter 7, demos 2 and 7)
+B5  bun test examples                 46 pass, 0 fail with the Windows patch (the four
+    example test files drive the same rules with mock tools and no model).
+
+--------------------------------------------------------------------------------
+6. Part C: the example agents with the real model
+--------------------------------------------------------------------------------
+Each agent: loadRules -> createPetriflowGate -> wrapTools -> generateText with the gate's
+system prompt and the wrapped tools, up to stepCountIs(N) steps. The model is the Azure
+deployment; the gate decisions are the real code path; the tool effects are described per
+example below. Run in this order; C0 first, always.
+
+C0  bun run labs/openai/00-check-key.ts
+    Expect "entra token: OK", a reply "OK", and "Credentials work."
+
+C1  examples/01-file-management   (prompt: clean up /tmp/project: list, delete temp.log, rm old-backup.tar.gz)
+    Needs two files, which the script creates: /tmp/project/temp.log and old-backup.tar.gz
+    (Git Bash maps /tmp to C:\tmp). Rules: require backup before delete; block rm. Tools
+    are REAL filesystem calls on that folder and nothing else.
+    What must hold: "BLOCKED rm: rm is blocked and cannot be called." whenever the model
+    tries rm; old-backup.tar.gz still exists at the end (the script runs ls -la for you);
+    temp.log.bak exists if temp.log is gone. A careful model may back up first and never
+    hit the delete block; that is a valid run.
+
+C2  examples/02-deployment   (prompt: deploy to production, then again to staging)
+    Rules: lint before test, test before deploy, human-approval before deploy (auto-approved
+    with a printed "APPROVAL REQUESTED" line), limit deploy to 2. The tools are real
+    commands: lint runs `bun run check` (typecheck, ~10 s, passes on Windows) and test runs
+    `bun test` on the WHOLE repository (~20 s per call). On Windows without
+    labs/windows-test-fix.diff the suite fails, the test tool returns passed:false, the
+    deferred transition never fires, and deploy stays blocked for the whole run. That is
+    the gate working, not a bug, but apply the patch if you want to see a deployment.
+    "Deployments" append to examples/02-deployment/.deploy-state.json (the script deletes
+    it first and prints it after). What must hold: no deploy line before a passing test;
+    at most two deployments; the third attempt prints the limit reason.
+
+C3  examples/03-discord-bot   needs DISCORD_BOT_TOKEN and DISCORD_GUILD_ID and a server
+    with a channel named dev-general. Without a bot the tool throws on the first call.
+    The script skips it unless the token is set; the gate logic is covered by B5.
+
+C4  examples/04-devops-assistant   INTERACTIVE=1. Ten rules across Slack, email,
+    deployment and files; the deploy and sendEmail approvals are real y/n prompts on the
+    terminal. Its web, Slack, Gmail and Resend tools need BRAVE_API_KEY, SLACK_BOT_TOKEN,
+    GMAIL_ACCESS_TOKEN, RESEND_API_KEY; without them those tools throw and the model
+    receives the error. The deployment and file parts work as in C1 and C2. Expect a
+    messy but honest run; the invariant lines are the BLOCKED lines and the y/n prompts.
+
+Cost: C1 and C2 together are typically ten to twenty model requests.
+
+--------------------------------------------------------------------------------
+7. What each example needs, and what cannot run on a laptop
+--------------------------------------------------------------------------------
+  Example                     Model   Other credentials                 Side effects                          Runs on the laptop?
+  01-file-management          Azure   none                              files under C:\tmp\project            yes
+  02-deployment               Azure   none                              .deploy-state.json; runs bun test     yes (slow: each test call ~20 s)
+  03-discord-bot              Azure   Discord bot token + guild         posts to a Discord channel            only with a bot you own
+  04-devops-assistant         Azure   Brave, Slack, Gmail, Resend       Slack posts, emails, files, deploys   partially; tools without keys error
+  05-openclaw-ops             none    OpenClaw itself for the plugin    none                                  verify.ts and B2 yes; the plugin no
+  comparisons/openclaw-safety none    none for the tests; Azure for run.ts   none                            tests yes; run.ts yes after the patch
+
+--------------------------------------------------------------------------------
+8. Reading the results folder
+--------------------------------------------------------------------------------
+results/<date>_examples/SUMMARY.txt first. Then:
+  A*.log   the fired sequence and the Final state block; A7 the six analyses
+  B1, B2   the 56 nets and the block/allow lines
+  C0       token OK and the tiny completion
+  C1       every "BLOCKED" line, the final answer, then the ls -la of C:\tmp\project
+  C2       APPROVAL REQUESTED lines, BLOCKED lines, the .deploy-state.json content
+Secrets are replaced by <REDACTED:NAME>; endpoint and deployment name remain (add
+REDACT_ENDPOINT=1 if you want the host hidden too). Do not push a results folder to the
+public ppp repository; commit it to the company repository (chapter 8, section 8.7).
+
+--------------------------------------------------------------------------------
+9. Git Bash versus PowerShell
+--------------------------------------------------------------------------------
+Everything in this repository assumes Git Bash. If a command misbehaves there, the two
+usual causes are line endings and a Windows path; both have one-line fixes below. If you
+must use PowerShell, use the right-hand column; the scripts (*.sh) cannot run in
+PowerShell at all, run them through Git Bash's bash.exe.
+
+  Git Bash                                   PowerShell equivalent
+  export AZURE_TENANT_ID=...                 $env:AZURE_TENANT_ID = "..."
+  set -a; source ~/.petriflow-azure.env; set +a
+                                             Get-Content ~\.petriflow-azure.env | Where-Object { $_ -match '^\s*[A-Z_]+=' } |
+                                               ForEach-Object { $k,$v = $_ -split '=',2; Set-Item -Path "env:$k" -Value $v }
+  MOCK=1 bun run labs/openai/01-file-agent.ts
+                                             $env:MOCK = "1"; bun run labs/openai/01-file-agent.ts; Remove-Item env:MOCK
+  bash labs/run-real.sh                      & "C:\Program Files\Git\bin\bash.exe" labs/run-real.sh
+  bash labs/run-examples.sh                  & "C:\Program Files\Git\bin\bash.exe" labs/run-examples.sh
+  mkdir -p /c/tmp/project                    New-Item -ItemType Directory -Force C:\tmp\project
+  bun test 2>&1 | tail -5                    bun test 2>&1 | Select-Object -Last 5
+  grep -n "BLOCKED" results/*/C1*.log        Select-String -Pattern "BLOCKED" results\*\C1*.log
+  curl http://localhost:3456/                curl.exe http://localhost:3456/    (plain curl is an alias of Invoke-WebRequest)
+  bun run labs/openai/03-server.ts &         Start-Process bun -ArgumentList "run labs/openai/03-server.ts"   (or a second window)
+  kill %1                                    Stop-Process -Name bun
+  git apply labs/azure-examples.diff         same command (git is the same)
+  sed -i 's/\r$//' labs/run-real.sh          (Get-Content labs\run-real.sh -Raw) -replace "`r`n","`n" | Set-Content -NoNewline labs\run-real.sh
+  cat results/*/SUMMARY.txt                  Get-Content results\*\SUMMARY.txt
+
+Known Git Bash issues and fixes
+  "$'\r': command not found"      the .sh file got CRLF line endings on checkout.
+                                  Fix: sed -i 's/\r$//' labs/run-real.sh labs/run-examples.sh
+  "bash: bun: command not found"  Bun installed for PowerShell only. Fix: add to ~/.bashrc:
+                                  export PATH="$HOME/.bun/bin:$PATH"   then open a new window.
+  "/c/tmp" versus "C:\tmp"        the same folder; Bun resolves "/tmp/project" to C:\tmp\project
+                                  on the current drive, so keep the clone on C:.
+  ENOENT ... /C:/.../safety.rules the file URL pathname bug; apply labs/azure-examples.diff
+                                  (agents) or labs/windows-test-fix.diff (tests).
+  Received: "src\"                win32 path.normalize; labs/windows-test-fix.diff.
+  AADSTS70011 / ENOTFOUND         proxy or scope; export HTTPS_PROXY, see chapter 13 part 7.
+  Port 3456 in use                PORT=3457 for the server, BASE=http://localhost:3457 for the client.
+
+--------------------------------------------------------------------------------
+10. The talk track for the two architecture diagrams
+--------------------------------------------------------------------------------
+diagrams/46-architecture-flow.png, four bands top to bottom. Say it in this order:
+
+  1. Top band: the model picks a tool call inside some agent framework. PetriFlow does
+     not replace the framework; it sits between the framework and the tools. The red box
+     on the right is the message history: since 0.2.0 the gate keeps no state of its own,
+     it rebuilds state from history at each request. That is where the forged-history
+     loophole lives.
+  2. Gate road: the adapter wraps each tool (wrapTools, or a hook in Claude Code, pi-mono,
+     OpenClaw). Before the tool runs, GateManager.composedToolCall asks every SkillNet for
+     a verdict in four phases: classify, approve, validate, commit. One rule, one small
+     net. Rules come from the text compiler; its "verification" is a state count per net
+     and nothing else. Replay (red) advances nets from history without approvals or
+     validators.
+  3. Engine road: a separate product. defineWorkflow builds a net with guards and execute
+     functions, createExecutor picks enabled transitions, Scheduler.tick persists to
+     SQLite. analyse() and the CLI's single command enumerate the net offline. The six
+     workflows are its examples; agent-benchmark is the 196-state one.
+  4. Layer 0: all mathematics is petri-ts, 208 lines. The gate uses canFire and fire at
+     runtime; the compiler calls analyse once to count; the engine's analyse uses the rest.
+     There is no symbolic analysis, no analysis of composed nets, no guards in analysis.
+
+diagrams/47-one-gated-tool-call.png, left to right. Say: one call, one line each.
+
+  1. The model emits a tool call with an id, name and input.
+  2. The adapter calls handleToolCall with a context that says whether a human can be
+     asked (hasUI) and how (confirm).
+  3. Phase 1 classify: for each net, free, abstain, blocked or gated; the tool mapper runs
+     here (bash plus a command becomes git-push). Any blocked net ends the call with the
+     reason text from the rule's metadata.
+  4. Phase 2: a manual transition awaits confirm; no UI means block.
+  5. Phase 3: validateToolCall may reject using per-net meta; rejected means meta is
+     rolled back to the snapshot.
+  6. Phase 4 commit: re-check enablement (the TOCTOU guard); a deferred transition is
+     parked as pending; others fire now and auto-advance.
+  7. Allowed: the original execute runs; its result is classified by isToolResultError;
+     handleToolResult fires the pending deferred transition only on success. Blocked: a
+     ToolCallBlockedError is thrown and the SDK returns the reason to the model as the
+     tool result, which is why a model can read the rule and adapt.
+  8. Replay is the same firing without phases 2 and 3.
+
+Then the demos in this order: A5 and A7 (engine and analysis), B2 (gate, no model),
+chapter 7 demo 3 (break the proof), C1 or lab 1 (real model), lab 3 spoof (loophole).
+
+--------------------------------------------------------------------------------
+11. What to commit afterwards
+--------------------------------------------------------------------------------
+To the company repository: labs/ (including the two diffs), results/<date>_examples and
+results/<date>_real, package.json and bun.lock, and, if you keep the examples on Azure,
+the five patched files. Scan the staged diff with the three greps in chapter 8 section
+8.7 before `git commit`. If the clone must stay pristine, commit only labs/ and results/
+and leave the patches unapplied; both patches are a `git apply` away.

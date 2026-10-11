@@ -58,7 +58,7 @@ Ran 597 tests across 39 files. [19.94s]
 ```
 
 Those 13 problems are all Windows path handling, in two places (section 13). After the
-reversible ten-file patch in section 13 the same command prints:
+reversible six-file patch in section 13 the same command prints:
 
 ```
  639 pass
@@ -851,9 +851,11 @@ fixes it without touching the code.
 
 ### 13.1 The patch
 
-`labs/windows-test-fix.diff` in this repository changes ten files by one line each (two lines
-in the two nets): `import.meta.dir` instead of the URL pathname in the eight example files,
-and `posix.normalize` in the two nets. Apply, test, and revert with:
+`labs/windows-test-fix.diff` in this repository changes six files: `import.meta.dir` instead of
+the URL pathname in the four example test files, and `posix.normalize` in the two nets (two
+lines each). The four example `agent.ts` files have the same path bug; they are covered by
+`labs/azure-examples.diff` (chapter 14), which can be applied alongside. Apply, test, and
+revert with:
 
 ```bash
 git apply <path-to-this-repo>/labs/windows-test-fix.diff
@@ -871,7 +873,7 @@ The diff, for reading without applying:
 +++ b/examples/01-file-management/agent.test.ts
 -  new URL("./safety.rules", import.meta.url).pathname,
 +  `${import.meta.dir}/safety.rules`,
-   (same one-line change in agent.ts, and in examples 02, 03, 04)
+   (same one-line change in examples 02, 03, 04; agent.ts is in azure-examples.diff)
 
 --- a/packages/pi-extension/src/nets/nuke.ts        (and packages/pi-assistant/src/nets/cleanup.ts)
 +++ b/packages/pi-extension/src/nets/nuke.ts
